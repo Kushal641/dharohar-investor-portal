@@ -28,6 +28,7 @@ const STATEMENT = [
   {
     code: "DCP-0001",
     name: "Aric Lee Gitomer",
+    referral: "USA Office", // sample value — real referral sources come from admin/sheet later
     logins: [{ email: "investor.b@dharohar-test.com", label: "Primary holder", display: "Aric Lee Gitomer" }],
     currentValue: 169310.42,
     entries: [
@@ -38,6 +39,7 @@ const STATEMENT = [
   {
     code: "DCP-0002",
     name: "Dwipen Ghosh",
+    referral: "Dubai Office",
     logins: [{ email: "investor.c@dharohar-test.com", label: "Primary holder", display: "Dwipen Ghosh" }],
     currentValue: 117882.01,
     entries: [
@@ -48,6 +50,7 @@ const STATEMENT = [
   {
     code: "DCP-0003",
     name: "Varsha & Bhuvan Gupta",
+    referral: "Dubai Office",
     logins: [
       { email: "investor.a@dharohar-test.com", label: "Primary holder", display: "Varsha Gupta" },
       { email: "investor.a2@dharohar-test.com", label: "Joint holder", display: "Bhuvan Gupta" },
@@ -92,10 +95,26 @@ async function main() {
   if (vehErr) throw new Error(`vehicle: ${vehErr.message}`);
 
   for (const inv of STATEMENT) {
+    let referralSourceId = null;
+    if (inv.referral) {
+      const { data: ref, error: refErr } = await admin
+        .from("referral_sources")
+        .upsert({ name: inv.referral }, { onConflict: "name" })
+        .select("id")
+        .single();
+      if (refErr) throw new Error(`referral(${inv.referral}): ${refErr.message}`);
+      referralSourceId = ref.id;
+    }
+
     const { data: investor, error: invErr } = await admin
       .from("investors")
       .upsert(
-        { investor_code: inv.code, full_name: inv.name, date_of_first_investment: "2026-05-01" },
+        {
+          investor_code: inv.code,
+          full_name: inv.name,
+          date_of_first_investment: "2026-05-01",
+          referral_source_id: referralSourceId,
+        },
         { onConflict: "investor_code" },
       )
       .select("id")
