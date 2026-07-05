@@ -22,7 +22,10 @@ export default async function AdminLayout({ children }: { children: React.ReactN
       sectionLabel="Admin Panel"
       navItems={[
         { href: "/admin/dashboard", label: "Overview" },
-        { href: "/internal/investors", label: "Investors" },
+        { href: "/admin/investors", label: "Investors" },
+        { href: "/admin/users", label: "Users" },
+        { href: "/admin/sync", label: "Sync" },
+        { href: "/internal/investors", label: "Reports" },
       ]}
     >
       {children}
