@@ -9,7 +9,7 @@ export default async function AdminOverviewPage() {
     supabase.from("investors").select("id", { count: "exact", head: true }),
     supabase
       .from("investor_vehicle_positions")
-      .select("current_valuation, ledger_entries(total_paid_in, sort_order)"),
+      .select("current_valuation, total_invested"),
     supabase
       .from("sync_runs")
       .select("started_at, status")
@@ -19,10 +19,7 @@ export default async function AdminOverviewPage() {
   ]);
 
   const totalValue = (positions ?? []).reduce((s, p) => s + (p.current_valuation ?? 0), 0);
-  const totalCapital = (positions ?? []).reduce((s, p) => {
-    const latest = [...(p.ledger_entries ?? [])].sort((a, b) => b.sort_order - a.sort_order)[0];
-    return s + (latest?.total_paid_in ?? 0);
-  }, 0);
+  const totalCapital = (positions ?? []).reduce((s, p) => s + (p.total_invested ?? 0), 0);
 
   const cards = [
     { label: "Total investors", value: String(investorCount ?? 0) },

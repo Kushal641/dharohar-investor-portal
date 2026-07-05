@@ -11,17 +11,10 @@ type InvestorRow = {
   referral_sources: { name: string } | null;
   investor_vehicle_positions: {
     current_valuation: number | null;
+    total_invested: number | null;
     investment_vehicles: { name: string } | null;
-    ledger_entries: { total_paid_in: number | null; sort_order: number }[];
   }[];
 };
-
-// "Amount invested" = the latest Total Paid In figure from the statement
-// ledger — a value the statement already provides, not something we derive.
-function investedForPosition(pos: InvestorRow["investor_vehicle_positions"][number]) {
-  const latest = [...pos.ledger_entries].sort((a, b) => b.sort_order - a.sort_order)[0];
-  return latest?.total_paid_in ?? 0;
-}
 
 export default async function InternalInvestorsPage({
   searchParams,
@@ -38,15 +31,18 @@ export default async function InternalInvestorsPage({
        referral_sources(name),
        investor_vehicle_positions(
          current_valuation,
-         investment_vehicles(name),
-         ledger_entries(total_paid_in, sort_order)
+         total_invested,
+         investment_vehicles(name)
        )`,
     )
     .order("full_name")
     .overrideTypes<InvestorRow[]>();
 
   const investors = (data ?? []).map((inv) => {
-    const invested = inv.investor_vehicle_positions.reduce((sum, p) => sum + investedForPosition(p), 0);
+    const invested = inv.investor_vehicle_positions.reduce(
+      (sum, p) => sum + (p.total_invested ?? 0),
+      0,
+    );
     const currentValue = inv.investor_vehicle_positions.reduce(
       (sum, p) => sum + (p.current_valuation ?? 0),
       0,

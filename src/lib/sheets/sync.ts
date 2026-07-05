@@ -411,6 +411,7 @@ export async function runSync(
     const last = parsed[parsed.length - 1].entry as {
       nav_per_unit: number | null;
       total_capital: number | null;
+      total_paid_in: number | null;
       entry_date: string;
     };
 
@@ -423,6 +424,7 @@ export async function runSync(
           nav_at_allocation: first.nav_per_unit,
           latest_nav: last.nav_per_unit,
           current_valuation: last.total_capital, // last row's Total Capital IS the current value
+          total_invested: last.total_paid_in, // last row's Total Paid In IS the amount invested
           valuation_date: last.entry_date,
           last_synced_at: new Date().toISOString(),
         },
