@@ -12,12 +12,7 @@ type Row = {
   investor_vehicle_positions: { current_valuation: number | null }[];
 };
 
-export default async function AdminInvestorsPage({
-  searchParams,
-}: {
-  searchParams: Promise<{ deleted?: string }>;
-}) {
-  const { deleted } = await searchParams;
+export default async function AdminInvestorsPage() {
   const supabase = await createClient();
   const { data } = await supabase
     .from("investors")
@@ -34,21 +29,11 @@ export default async function AdminInvestorsPage({
 
   return (
     <div>
-      <div className="flex items-center justify-between">
-        <h2 className="text-lg font-semibold text-zinc-900">Investor management</h2>
-        <Link
-          href="/admin/investors/new"
-          className="rounded-md bg-[#f4511e] px-4 py-2 text-sm font-semibold text-white hover:bg-[#d8430f]"
-        >
-          + Add investor
-        </Link>
-      </div>
-
-      {deleted && (
-        <p className="mt-4 rounded-md bg-green-50 px-3 py-2 text-sm text-green-800">
-          Investor deleted.
-        </p>
-      )}
+      <h2 className="text-lg font-semibold text-zinc-900">Investor access</h2>
+      <p className="mt-1 text-sm text-zinc-500">
+        Investor data comes exclusively from the Google Sheet — add or change investors there and
+        run a sync. This screen manages portal access (logins) only.
+      </p>
 
       <div className="mt-6 overflow-x-auto rounded-md border border-zinc-100">
         <table className="w-full border-collapse text-sm">
@@ -91,10 +76,10 @@ export default async function AdminInvestorsPage({
                 </td>
                 <td className="px-4 py-2.5 text-right">
                   <Link
-                    href={`/admin/investors/${inv.id}/edit`}
+                    href={`/admin/investors/${inv.id}`}
                     className="text-sm font-medium text-[#f4511e] hover:text-[#d8430f]"
                   >
-                    Manage
+                    Manage access
                   </Link>
                 </td>
               </tr>

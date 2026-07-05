@@ -59,6 +59,12 @@ export default async function LoginPage({
           Forgot your password?
         </Link>
       </p>
+      <p className="border-t border-zinc-100 pt-4 text-center text-sm text-zinc-500">
+        First time here?{" "}
+        <Link href="/activate" className="font-medium text-[#f4511e] hover:text-[#d8430f]">
+          Activate your account
+        </Link>
+      </p>
     </form>
   );
 }

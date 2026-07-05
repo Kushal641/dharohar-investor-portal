@@ -8,7 +8,10 @@ import { readSheetTab, sheetsConfigured } from "./client";
 // (case-insensitive, ignoring spaces/slashes).
 //
 // Tab "Investors":
-//   Investor ID | Full Name | Email | Referral Source | Date of First Investment
+//   Investor ID | Full Name | Email | Email 2 | Referral Source | Date of First Investment
+//   ("Email 2" is optional — second login for joint accounts. Any email listed
+//    is automatically authorized as a portal login for that investor; the
+//    investor activates it themselves via the OTP flow on first visit.)
 //
 // Tab "Ledger" (one row per statement line, grouped by investor+vehicle):
 //   Investor ID | Investment Vehicle | Date | Transaction |
@@ -59,6 +62,77 @@ function parseDate(raw: string | undefined): string | null | "invalid" {
     return parsed.toISOString().slice(0, 10);
   }
   return "invalid";
+}
+
+// Idempotently ensure `email` is an authorized investor login linked to
+// `investorId`. Returns "created" | "existing" | "conflict".
+async function authorizeLogin(
+  admin: ReturnType<typeof createAdminClient>,
+  investorId: string,
+  email: string,
+  displayName: string,
+  label: string,
+): Promise<"created" | "existing" | "conflict"> {
+  // Already an auth user with this email?
+  const { data: list } = await admin.auth.admin.listUsers({ perPage: 1000 });
+  const existingUser = list.users.find((u) => u.email?.toLowerCase() === email);
+
+  if (existingUser) {
+    const { data: link } = await admin
+      .from("investor_auth_links")
+      .select("investor_id")
+      .eq("auth_user_id", existingUser.id)
+      .maybeSingle();
+    if (link) return link.investor_id === investorId ? "existing" : "conflict";
+
+    // Auth user exists but isn't linked (e.g. internal user email reused).
+    const { data: profile } = await admin
+      .from("user_profiles")
+      .select("role")
+      .eq("id", existingUser.id)
+      .maybeSingle();
+    if (profile && profile.role !== "investor") return "conflict";
+
+    if (!profile) {
+      await admin.from("user_profiles").insert({
+        id: existingUser.id,
+        role: "investor",
+        display_name: displayName,
+        must_change_password: true,
+      });
+    }
+    const { error } = await admin
+      .from("investor_auth_links")
+      .insert({ investor_id: investorId, auth_user_id: existingUser.id, label });
+    return error ? "conflict" : "created";
+  }
+
+  // Brand-new: passwordless account, activated by the investor via OTP.
+  const { data: created, error: createError } = await admin.auth.admin.createUser({
+    email,
+    email_confirm: true,
+  });
+  if (createError || !created.user) return "conflict";
+
+  const { error: profileError } = await admin.from("user_profiles").insert({
+    id: created.user.id,
+    role: "investor",
+    display_name: displayName,
+    must_change_password: true, // forces password setup right after OTP entry
+  });
+  if (profileError) {
+    await admin.auth.admin.deleteUser(created.user.id);
+    return "conflict";
+  }
+
+  const { error: linkError } = await admin
+    .from("investor_auth_links")
+    .insert({ investor_id: investorId, auth_user_id: created.user.id, label });
+  if (linkError) {
+    await admin.auth.admin.deleteUser(created.user.id);
+    return "conflict";
+  }
+  return "created";
 }
 
 export async function runSync(
@@ -165,8 +239,6 @@ export async function runSync(
       referralSourceId = ref?.id ?? null;
     }
 
-    // New investors get a data record but NO login — the admin grants portal
-    // access deliberately (a sheet typo must never create a live account).
     const { data: investor, error } = await admin
       .from("investors")
       .upsert(
@@ -192,6 +264,33 @@ export async function runSync(
     }
     investorIdsInSheet.set(code, investor.id);
     rowsUpserted++;
+
+    // Authorize portal logins for the sheet's email columns. The sync only
+    // AUTHORIZES (creates a passwordless account the investor activates via
+    // OTP); it never sets passwords and never deletes logins — removing
+    // access is a deliberate admin action in the portal.
+    const emails = [
+      { header: "Email", label: "Primary holder" },
+      { header: "Email 2", label: "Joint holder" },
+    ]
+      .map(({ header, label }) => ({
+        email: (row[invCol(header) ?? -1] ?? "").trim().toLowerCase(),
+        label,
+      }))
+      .filter(({ email }) => email);
+
+    for (const { email, label } of emails) {
+      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+        issues.push({ sheet_row_number: sheetRowNumber, issue_type: "bad_email", message: `Investor ${code}: "${email}" doesn't look like an email address — login not authorized` });
+        continue;
+      }
+      const result = await authorizeLogin(admin, investor.id, email, fullName, label);
+      if (result === "created") {
+        issues.push({ sheet_row_number: sheetRowNumber, issue_type: "login_authorized", message: `Login authorized for ${code}: ${email} (${label}) — investor can now activate via OTP` });
+      } else if (result === "conflict") {
+        issues.push({ sheet_row_number: sheetRowNumber, issue_type: "email_conflict", message: `Investor ${code}: ${email} is already used by a different account — login NOT changed, resolve manually` });
+      }
+    }
   }
 
   // ---------- Ledger tab ----------
@@ -351,6 +450,7 @@ export async function runSync(
     rowsUpserted += parsed.length;
   }
 
-  const hasBlockingIssues = issues.some((i) => i.issue_type !== "new_vehicle_created");
+  const INFO_ISSUES = new Set(["new_vehicle_created", "login_authorized"]);
+  const hasBlockingIssues = issues.some((i) => !INFO_ISSUES.has(i.issue_type));
   return finish(hasBlockingIssues ? "partial_failure" : "success");
 }

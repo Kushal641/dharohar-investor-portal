@@ -1,7 +1,7 @@
 import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
 
-const PUBLIC_PATHS = ["/login", "/forgot-password", "/reset-password", "/auth/callback"];
+const PUBLIC_PATHS = ["/login", "/activate", "/forgot-password", "/reset-password", "/auth/callback"];
 
 const ROLE_HOME: Record<string, string> = {
   investor: "/dashboard",
