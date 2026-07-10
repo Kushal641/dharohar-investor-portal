@@ -327,21 +327,41 @@ export async function runSync(
     issues.push({ sheet_row_number: null, issue_type: "accounts_tab_unreadable", message: `Could not read the "${ACCOUNTS_TAB}" tab — ledger detail skipped this run: ${(err as Error).message}` });
   }
 
+  // Later blocks in the sheet often omit their own header row, relying on
+  // the most recently seen one (same 11 columns throughout the tab) — so
+  // the header mapping persists across blocks instead of being required
+  // immediately after every name row.
+  let lastLedCol: ((name: string) => number | undefined) | null = null;
+
   for (let r = 0; r < accountsRows.length; r++) {
     const row = accountsRows[r];
     const cellA = (row[0] ?? "").trim();
     const restEmpty = row.slice(1).every((c) => !c || !c.trim());
     if (!cellA || !restEmpty) continue; // not a candidate block-name row
 
-    const headerRow = accountsRows[r + 1];
-    const nextCellA = (headerRow?.[0] ?? "").trim();
-    if (normalizeHeader(nextCellA) !== normalizeHeader("Date")) continue; // not followed by a header row
+    // Look past any blank rows for either a header row (updates the
+    // remembered column mapping) or, if this block has no header of its
+    // own, the first ledger row directly (reusing the last mapping seen).
+    let i = r + 1;
+    while (i < accountsRows.length && !(accountsRows[i][0] ?? "").trim()) i++;
+    if (i >= accountsRows.length) continue;
+
+    const nextCellA = (accountsRows[i][0] ?? "").trim();
+    let ledCol: ((name: string) => number | undefined) | null;
+    if (normalizeHeader(nextCellA) === normalizeHeader("Date")) {
+      ledCol = indexHeaders(accountsRows[i]);
+      lastLedCol = ledCol;
+      i++;
+    } else if (lastLedCol) {
+      const maybeDate = parseDate(nextCellA);
+      if (maybeDate === null || maybeDate === "invalid") continue; // not a block
+      ledCol = lastLedCol;
+    } else {
+      continue; // no header seen yet to reuse, and this isn't one
+    }
 
     const blockNameRowNumber = r + 1;
-    const ledCol = indexHeaders(headerRow);
-
     const entries: ParsedLedgerEntry[] = [];
-    let i = r + 2;
     for (; i < accountsRows.length; i++) {
       const dataRow = accountsRows[i];
       const entryDate = parseDate(dataRow[ledCol("Date") ?? -1]);
