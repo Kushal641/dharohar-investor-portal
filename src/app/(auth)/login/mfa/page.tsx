@@ -1,4 +1,4 @@
-import { verifyAdminMfa } from "../actions";
+import { verifyMfa } from "../actions";
 import { INPUT_CLASS, BUTTON_CLASS } from "@/components/form-controls";
 
 const ERROR_MESSAGES: Record<string, string> = {
@@ -7,7 +7,7 @@ const ERROR_MESSAGES: Record<string, string> = {
   failed: "Couldn't start verification. Log in again.",
 };
 
-export default async function AdminMfaPage({
+export default async function LoginMfaPage({
   searchParams,
 }: {
   searchParams: Promise<{ error?: string }>;
@@ -19,7 +19,7 @@ export default async function AdminMfaPage({
       <p className="mb-4 text-sm text-zinc-600">
         Enter the 6-digit code from your authenticator app to continue.
       </p>
-      <form action={verifyAdminMfa} className="space-y-4">
+      <form action={verifyMfa} className="space-y-4">
         {error && (
           <p className="rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">
             {ERROR_MESSAGES[error] ?? "Something went wrong. Please try again."}

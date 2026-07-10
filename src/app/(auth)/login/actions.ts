@@ -12,25 +12,43 @@ export async function login(formData: FormData) {
   }
 
   const supabase = await createClient();
-  const { data, error } = await supabase.auth.signInWithPassword({ email, password });
+  const { error } = await supabase.auth.signInWithPassword({ email, password });
 
   if (error) {
     redirect("/login?error=invalid");
   }
 
-  // SOP §12.3: the admin account is not usable from the standard login screen
-  // (separate, unlinked /admin-login route). Respond with the same generic
-  // error as a wrong password so the admin login stays undiscoverable.
-  const { data: profile } = await supabase
-    .from("user_profiles")
-    .select("role")
-    .eq("id", data.user.id)
-    .single();
-
-  if (profile?.role === "admin") {
-    await supabase.auth.signOut();
-    redirect("/login?error=invalid");
+  // If a TOTP factor is enrolled (admins), require the authenticator code
+  // before the session is good for anything past AAL1 — proxy.ts enforces
+  // AAL2 for /admin routes.
+  const { data: factors } = await supabase.auth.mfa.listFactors();
+  if (factors && factors.totp.length > 0) {
+    redirect("/login/mfa");
   }
+
+  redirect("/");
+}
+
+export async function verifyMfa(formData: FormData) {
+  const code = String(formData.get("code") ?? "").trim();
+  if (!code) redirect("/login/mfa?error=missing");
+
+  const supabase = await createClient();
+  const { data: factors } = await supabase.auth.mfa.listFactors();
+  const totp = factors?.totp[0];
+  if (!totp) redirect("/login");
+
+  const { data: challenge, error: challengeError } = await supabase.auth.mfa.challenge({
+    factorId: totp.id,
+  });
+  if (challengeError || !challenge) redirect("/login/mfa?error=failed");
+
+  const { error: verifyError } = await supabase.auth.mfa.verify({
+    factorId: totp.id,
+    challengeId: challenge.id,
+    code,
+  });
+  if (verifyError) redirect("/login/mfa?error=invalid");
 
   redirect("/");
 }

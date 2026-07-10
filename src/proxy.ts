@@ -3,7 +3,6 @@ import { NextResponse, type NextRequest } from "next/server";
 
 const PUBLIC_PATHS = [
   "/login",
-  "/admin-login",
   "/activate",
   "/forgot-password",
   "/reset-password",
@@ -27,12 +26,6 @@ const LAST_ACTIVE_COOKIE = "portal_last_active";
 
 function isInvestorSection(path: string) {
   return path.startsWith("/dashboard") || path.startsWith("/vehicles") || path.startsWith("/account");
-}
-
-function loginPathFor(role: string | null, path: string) {
-  // Unauthenticated hits on /admin paths go to the unlinked admin login.
-  if (role === "admin" || path.startsWith("/admin")) return "/admin-login";
-  return "/login";
 }
 
 export default async function proxy(request: NextRequest) {
@@ -67,12 +60,12 @@ export default async function proxy(request: NextRequest) {
   // Not signed in -> only public auth pages are reachable.
   if (!user && !isPublic) {
     const url = request.nextUrl.clone();
-    url.pathname = loginPathFor(null, path);
+    url.pathname = "/login";
     return NextResponse.redirect(url);
   }
 
-  // Signed in but hitting a login screen -> bounce to their home.
-  if (user && (path === "/login" || path === "/admin-login")) {
+  // Signed in but hitting the login screen -> bounce to their home.
+  if (user && path === "/login") {
     const url = request.nextUrl.clone();
     url.pathname = "/";
     return NextResponse.redirect(url);
@@ -103,7 +96,7 @@ export default async function proxy(request: NextRequest) {
     if (lastActive && Number.isFinite(lastActive) && Date.now() - lastActive > limit) {
       await supabase.auth.signOut();
       const url = request.nextUrl.clone();
-      url.pathname = loginPathFor(role, path);
+      url.pathname = "/login";
       url.search = "";
       url.searchParams.set("error", "session_expired");
       const redirect = NextResponse.redirect(url);
@@ -129,7 +122,7 @@ export default async function proxy(request: NextRequest) {
       const { data: aal } = await supabase.auth.mfa.getAuthenticatorAssuranceLevel();
       if (aal && aal.nextLevel === "aal2" && aal.currentLevel !== "aal2") {
         const url = request.nextUrl.clone();
-        url.pathname = "/admin-login/mfa";
+        url.pathname = "/login/mfa";
         return NextResponse.redirect(url);
       }
     }
