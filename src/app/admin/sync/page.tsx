@@ -39,9 +39,9 @@ export default async function AdminSyncPage() {
         <div>
           <h2 className="text-lg font-semibold text-zinc-900">Monthly data sync</h2>
           <p className="mt-1 text-sm text-zinc-500">
-            Pulls the master Google Sheet (tabs &quot;Investors&quot; and &quot;Ledger&quot;) and
-            updates the portal. Runs automatically on the 1st of each month; use the button for
-            an immediate refresh.
+            Pulls the master Google Sheet (tabs &quot;AIGF vs Al Maha&quot; and
+            &quot;Accounts&quot;) and updates the portal. Runs automatically on the 1st of each
+            month; use the button for an immediate refresh.
           </p>
         </div>
         <form action={syncNow}>

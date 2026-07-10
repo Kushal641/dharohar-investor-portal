@@ -1,28 +1,38 @@
 import "server-only";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { authorizeLogin } from "@/lib/auth/authorize-login";
 import { readSheetTab, sheetsConfigured } from "./client";
 
 // ============================================================
-// Expected Google Sheet layout (two tabs). Header row required;
-// column order doesn't matter, headers are matched by name
-// (case-insensitive, ignoring spaces/slashes).
+// Expected Google Sheet layout (two tabs). Column order doesn't matter —
+// headers are matched by name (case-insensitive, ignoring spaces/slashes) —
+// but row position does: the header row is found by scanning, not assumed
+// to be row 1, since the real sheet has title rows above it.
 //
-// Tab "Investors":
-//   Investor ID | Full Name | Email | Email 2 | Referral Source | Date of First Investment
-//   ("Email 2" is optional — second login for joint accounts. Any email listed
-//    is automatically authorized as a portal login for that investor; the
-//    investor activates it themselves via the OTP flow on first visit.)
+// Tab "AIGF vs Al Maha" (the investor list):
+//   S. No. | Name | Fund | Referral | Invested Amount | Current Value
+//   "Fund" is "AIGF" or "Al Maha" (mapped to the full vehicle name below,
+//   not stored verbatim). Rows stop at the first blank Name — everything
+//   below that on the tab is on-sheet summary formulas, not data.
 //
-// Tab "Ledger" (one row per statement line, grouped by investor+vehicle):
-//   Investor ID | Investment Vehicle | Date | Transaction |
-//   Units Change | Total Units | Paid In Change | Total Paid In |
-//   Gain/Loss Change | Total Gain/Loss | Capital Change | Total Capital |
-//   NAV per Unit | Remarks
+// Tab "Accounts" (per-investor NAV ledger — stacked blocks, not one flat
+// table): a row with just the investor's name in column A, immediately
+// followed by a header row (Date | Transaction | Units Change | Total
+// Units | Paid In Change | Total Paid In | Gain/Loss Change | Total
+// Gain/Loss | Total Capital Change | Total Capital | NAV per Unit), then
+// that investor's ledger rows, until a row whose Date column doesn't parse
+// (blank row, or a "CURRENT VALUE AS OF ..." summary line) ends the block.
+// Investors with no block (e.g. today, all Al Maha investors) get their
+// position from the main tab's Invested Amount / Current Value directly,
+// with no ledger detail.
 //
-// Principle: upload -> map -> display. Values are stored verbatim; the
-// position's "current value" is the LAST ledger row's Total Capital.
-// Dates: use YYYY-MM-DD or "May 01, 2026" format (not DD/MM/YYYY — ambiguous).
+// Investors are matched to existing DB rows by normalized name — this
+// sheet has no stable per-row ID column. An unmatched name gets a freshly
+// minted "DCP-####" code (logged as an info issue so admins notice and can
+// sanity-check it wasn't just a name edit, not a genuinely new investor).
+//
+// There are no email columns on this sheet. Portal logins are never
+// touched by this sync — they're provisioned manually via the admin
+// "Add login" action (src/app/admin/investors/actions.ts).
 // ============================================================
 
 type Issue = { sheet_row_number: number | null; issue_type: string; message: string; raw_row_data?: unknown };
@@ -36,6 +46,14 @@ export type SyncResult = {
   issues: Issue[];
 };
 
+const MAIN_TAB = "AIGF vs Al Maha";
+const ACCOUNTS_TAB = "Accounts";
+
+const FUND_NAMES: Record<string, string> = {
+  aigf: "Ananta India Growth Incorporated VCC Sub-Fund 1",
+  almaha: "Al Maha Investment Fund PCC - Asia Strategy",
+};
+
 function normalizeHeader(h: string) {
   return h.toLowerCase().replace(/[^a-z]/g, "");
 }
@@ -44,6 +62,18 @@ function indexHeaders(headerRow: string[]) {
   const map = new Map<string, number>();
   headerRow.forEach((h, i) => map.set(normalizeHeader(h), i));
   return (name: string) => map.get(normalizeHeader(name));
+}
+
+// Treats "and" and "&" as equivalent, since the same joint-holder name
+// appears as "Varsha and Bhuvan Gupta" on the main tab but "Varsha &
+// Bhuvan Gupta" in the Accounts tab's block header.
+function normalizeName(name: string) {
+  return name
+    .trim()
+    .toLowerCase()
+    .replace(/\s+and\s+/g, " & ")
+    .replace(/\s*&\s*/g, " & ")
+    .replace(/\s+/g, " ");
 }
 
 function parseNumber(raw: string | undefined): number | null | "invalid" {
@@ -57,13 +87,46 @@ function parseDate(raw: string | undefined): string | null | "invalid" {
   if (!raw || !raw.trim()) return null;
   const trimmed = raw.trim();
   if (/^\d{4}-\d{2}-\d{2}$/.test(trimmed)) return trimmed;
-  // "May 01, 2026" and similar unambiguous formats
-  const parsed = new Date(trimmed);
-  if (!Number.isNaN(parsed.getTime()) && /[a-zA-Z]/.test(trimmed)) {
-    return parsed.toISOString().slice(0, 10);
+  // "May 01, 2026" and similar — the WHOLE cell must look like a date, not
+  // just contain one (otherwise a summary line like "CURRENT VALUE AS OF
+  // MAY 31, 2026" parses too, since new Date() extracts a date from within
+  // a longer sentence).
+  if (/^[A-Za-z]+\.? \d{1,2},? \d{4}$/.test(trimmed)) {
+    const parsed = new Date(trimmed);
+    if (!Number.isNaN(parsed.getTime())) {
+      return parsed.toISOString().slice(0, 10);
+    }
   }
   return "invalid";
 }
+
+type InvestorRecord = { id: string; investor_code: string; full_name: string };
+
+type ParsedLedgerEntry = {
+  entry_date: string;
+  transaction_type: string;
+  units_change: number | null;
+  total_units: number | null;
+  paid_in_change: number | null;
+  total_paid_in: number | null;
+  gain_loss_change: number | null;
+  total_gain_loss: number | null;
+  capital_change: number | null;
+  total_capital: number | null;
+  nav_per_unit: number | null;
+};
+
+const LEDGER_NUMBER_FIELDS: [keyof ParsedLedgerEntry, string][] = [
+  ["units_change", "Units Change"],
+  ["total_units", "Total Units"],
+  ["paid_in_change", "Paid In Change"],
+  ["total_paid_in", "Total Paid In"],
+  ["gain_loss_change", "Gain/Loss Change"],
+  ["total_gain_loss", "Total Gain/Loss"],
+  ["capital_change", "Total Capital Change"],
+  ["total_capital", "Total Capital"],
+  ["nav_per_unit", "NAV per Unit"],
+];
 
 export async function runSync(
   triggeredBy: "manual" | "scheduled",
@@ -117,49 +180,77 @@ export async function runSync(
     );
   }
 
-  let investorRows: string[][];
-  let ledgerRows: string[][];
+  let mainRows: string[][];
   try {
-    [investorRows, ledgerRows] = await Promise.all([
-      readSheetTab("Investors"),
-      readSheetTab("Ledger"),
-    ]);
+    mainRows = await readSheetTab(MAIN_TAB);
   } catch (err) {
-    return finish("failed", `Could not read the Google Sheet: ${(err as Error).message}`);
+    return finish("failed", `Could not read the "${MAIN_TAB}" tab: ${(err as Error).message}`);
+  }
+  if (!mainRows.length) {
+    return finish("failed", `Tab "${MAIN_TAB}" is empty or missing.`);
   }
 
-  if (!investorRows.length || !ledgerRows.length) {
-    return finish("failed", "Sheet tabs 'Investors' and/or 'Ledger' are empty or missing.");
+  // ---------- Load existing investors for name matching ----------
+  const { data: existingInvestors } = await admin.from("investors").select("id, investor_code, full_name");
+
+  const byNormalizedName = new Map<string, InvestorRecord>();
+  let maxCodeSuffix = 0;
+  for (const inv of existingInvestors ?? []) {
+    byNormalizedName.set(normalizeName(inv.full_name), inv);
+    const m = /^DCP-(\d+)$/.exec(inv.investor_code);
+    if (m) maxCodeSuffix = Math.max(maxCodeSuffix, parseInt(m[1], 10));
+  }
+  function nextInvestorCode() {
+    maxCodeSuffix += 1;
+    return `DCP-${String(maxCodeSuffix).padStart(4, "0")}`;
   }
 
-  // ---------- Investors tab ----------
-  const invCol = indexHeaders(investorRows[0]);
-  const investorIdsInSheet = new Map<string, string>(); // code -> db id
+  // ---------- Main tab: investor list ----------
+  const headerIdx = mainRows.findIndex((row) => {
+    const col = indexHeaders(row);
+    return col("Name") !== undefined && col("Fund") !== undefined;
+  });
+  if (headerIdx === -1) {
+    return finish("failed", `Could not find a header row with "Name" and "Fund" columns in the "${MAIN_TAB}" tab.`);
+  }
+  const mainCol = indexHeaders(mainRows[headerIdx]);
 
-  for (let r = 1; r < investorRows.length; r++) {
-    const row = investorRows[r];
-    rowsRead++;
+  type PositionInput = {
+    code: string;
+    vehicleId: string;
+    invested: number | null;
+    current: number | null;
+    sheetRowNumber: number;
+  };
+  const positionsByInvestorId = new Map<string, PositionInput>();
+  const vehicleIds = new Map<string, string>();
+
+  for (let r = headerIdx + 1; r < mainRows.length; r++) {
+    const row = mainRows[r];
     const sheetRowNumber = r + 1;
-    const code = (row[invCol("Investor ID") ?? -1] ?? "").trim();
-    const fullName = (row[invCol("Full Name") ?? -1] ?? "").trim();
-    if (!code) {
+    const name = (row[mainCol("Name") ?? -1] ?? "").trim();
+    if (!name) break; // end of the investor rows — summary blocks follow
+
+    rowsRead++;
+
+    const fundRaw = (row[mainCol("Fund") ?? -1] ?? "").trim();
+    const vehicleName = FUND_NAMES[fundRaw.toLowerCase().replace(/[^a-z]/g, "")];
+    if (!vehicleName) {
       rowsSkipped++;
-      issues.push({ sheet_row_number: sheetRowNumber, issue_type: "missing_investor_id", message: "Investors tab row has no Investor ID", raw_row_data: row });
-      continue;
-    }
-    if (!fullName) {
-      rowsSkipped++;
-      issues.push({ sheet_row_number: sheetRowNumber, issue_type: "missing_name", message: `Investor ${code} has no Full Name`, raw_row_data: row });
+      issues.push({ sheet_row_number: sheetRowNumber, issue_type: "unknown_fund", message: `Investor "${name}": unrecognized Fund "${fundRaw}" — row skipped`, raw_row_data: row });
       continue;
     }
 
-    const firstInvestment = parseDate(row[invCol("Date of First Investment") ?? -1]);
-    if (firstInvestment === "invalid") {
-      issues.push({ sheet_row_number: sheetRowNumber, issue_type: "bad_date", message: `Investor ${code}: unreadable Date of First Investment — field left unchanged`, raw_row_data: row });
+    const investedAmount = parseNumber(row[mainCol("Invested Amount") ?? -1]);
+    const currentValue = parseNumber(row[mainCol("Current Value") ?? -1]);
+    if (investedAmount === "invalid" || currentValue === "invalid") {
+      rowsSkipped++;
+      issues.push({ sheet_row_number: sheetRowNumber, issue_type: "bad_number", message: `Investor "${name}": unreadable Invested Amount or Current Value — row skipped`, raw_row_data: row });
+      continue;
     }
 
     let referralSourceId: string | null = null;
-    const referralName = (row[invCol("Referral Source") ?? -1] ?? "").trim();
+    const referralName = (row[mainCol("Referral") ?? -1] ?? "").trim();
     if (referralName) {
       const { data: ref } = await admin
         .from("referral_sources")
@@ -169,19 +260,14 @@ export async function runSync(
       referralSourceId = ref?.id ?? null;
     }
 
+    const normalized = normalizeName(name);
+    const existing = byNormalizedName.get(normalized);
+    const code = existing?.investor_code ?? nextInvestorCode();
+
     const { data: investor, error } = await admin
       .from("investors")
       .upsert(
-        {
-          investor_code: code,
-          full_name: fullName,
-          email: (row[invCol("Email") ?? -1] ?? "").trim() || null,
-          referral_source_id: referralSourceId,
-          ...(firstInvestment && firstInvestment !== "invalid"
-            ? { date_of_first_investment: firstInvestment }
-            : {}),
-          updated_at: new Date().toISOString(),
-        },
+        { investor_code: code, full_name: name, referral_source_id: referralSourceId, updated_at: new Date().toISOString() },
         { onConflict: "investor_code" },
       )
       .select("id")
@@ -189,131 +275,72 @@ export async function runSync(
 
     if (error || !investor) {
       rowsSkipped++;
-      issues.push({ sheet_row_number: sheetRowNumber, issue_type: "upsert_failed", message: `Investor ${code}: ${error?.message}`, raw_row_data: row });
+      issues.push({ sheet_row_number: sheetRowNumber, issue_type: "upsert_failed", message: `Investor "${name}": ${error?.message}`, raw_row_data: row });
       continue;
     }
-    investorIdsInSheet.set(code, investor.id);
+
+    if (!existing) {
+      issues.push({ sheet_row_number: sheetRowNumber, issue_type: "new_investor_created", message: `New investor "${name}" added as ${code} — verify this isn't just a renamed existing investor` });
+    }
+    byNormalizedName.set(normalized, { id: investor.id, investor_code: code, full_name: name });
     rowsUpserted++;
-
-    // Authorize portal logins for the sheet's email columns. The sync only
-    // AUTHORIZES (creates a passwordless account the investor activates via
-    // OTP); it never sets passwords and never deletes logins — removing
-    // access is a deliberate admin action in the portal.
-    const emails = [
-      { header: "Email", label: "Primary holder" },
-      { header: "Email 2", label: "Joint holder" },
-    ]
-      .map(({ header, label }) => ({
-        email: (row[invCol(header) ?? -1] ?? "").trim().toLowerCase(),
-        label,
-      }))
-      .filter(({ email }) => email);
-
-    for (const { email, label } of emails) {
-      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
-        issues.push({ sheet_row_number: sheetRowNumber, issue_type: "bad_email", message: `Investor ${code}: "${email}" doesn't look like an email address — login not authorized` });
-        continue;
-      }
-      const result = await authorizeLogin(admin, investor.id, email, fullName, label);
-      if (result === "created") {
-        issues.push({ sheet_row_number: sheetRowNumber, issue_type: "login_authorized", message: `Login authorized for ${code}: ${email} (${label}) — investor can now activate via OTP` });
-      } else if (result === "conflict") {
-        issues.push({ sheet_row_number: sheetRowNumber, issue_type: "email_conflict", message: `Investor ${code}: ${email} is already used by a different account — login NOT changed, resolve manually` });
-      }
-    }
-  }
-
-  // ---------- Ledger tab ----------
-  const ledCol = indexHeaders(ledgerRows[0]);
-  type LedgerRow = { sheetRowNumber: number; raw: string[] };
-  const groups = new Map<string, LedgerRow[]>(); // "code||vehicle" -> rows in sheet order
-
-  for (let r = 1; r < ledgerRows.length; r++) {
-    const row = ledgerRows[r];
-    rowsRead++;
-    const code = (row[ledCol("Investor ID") ?? -1] ?? "").trim();
-    const vehicle = (row[ledCol("Investment Vehicle") ?? -1] ?? "").trim();
-    if (!code || !vehicle) {
-      rowsSkipped++;
-      issues.push({ sheet_row_number: r + 1, issue_type: "missing_key", message: "Ledger row missing Investor ID or Investment Vehicle", raw_row_data: row });
-      continue;
-    }
-    const key = `${code}||${vehicle}`;
-    if (!groups.has(key)) groups.set(key, []);
-    groups.get(key)!.push({ sheetRowNumber: r + 1, raw: row });
-  }
-
-  const vehicleIds = new Map<string, string>();
-
-  for (const [key, rows] of groups) {
-    const [code, vehicleName] = key.split("||");
-
-    let investorId = investorIdsInSheet.get(code);
-    if (!investorId) {
-      const { data: existing } = await admin
-        .from("investors")
-        .select("id")
-        .eq("investor_code", code)
-        .maybeSingle();
-      if (!existing) {
-        rowsSkipped += rows.length;
-        issues.push({ sheet_row_number: rows[0].sheetRowNumber, issue_type: "unknown_investor_code", message: `Ledger references Investor ID "${code}" which is not in the Investors tab or database — ${rows.length} row(s) skipped` });
-        continue;
-      }
-      investorId = existing.id;
-    }
 
     let vehicleId = vehicleIds.get(vehicleName);
     if (!vehicleId) {
-      const { data: existingVehicle } = await admin
+      const { data: vehicle, error: vehicleError } = await admin
         .from("investment_vehicles")
+        .upsert({ name: vehicleName }, { onConflict: "name" })
         .select("id")
-        .eq("name", vehicleName)
-        .maybeSingle();
-      if (existingVehicle) {
-        vehicleId = existingVehicle.id as string;
-      } else {
-        const { data: newVehicle, error } = await admin
-          .from("investment_vehicles")
-          .insert({ name: vehicleName })
-          .select("id")
-          .single();
-        if (error || !newVehicle) {
-          rowsSkipped += rows.length;
-          issues.push({ sheet_row_number: rows[0].sheetRowNumber, issue_type: "vehicle_create_failed", message: `Could not create vehicle "${vehicleName}": ${error?.message}` });
-          continue;
-        }
-        vehicleId = newVehicle.id as string;
-        issues.push({ sheet_row_number: rows[0].sheetRowNumber, issue_type: "new_vehicle_created", message: `New investment vehicle "${vehicleName}" was created from the sheet — verify the name is not a typo` });
+        .single();
+      if (vehicleError || !vehicle) {
+        rowsSkipped++;
+        issues.push({ sheet_row_number: sheetRowNumber, issue_type: "vehicle_upsert_failed", message: `Vehicle "${vehicleName}": ${vehicleError?.message}` });
+        continue;
       }
+      vehicleId = vehicle.id as string;
       vehicleIds.set(vehicleName, vehicleId);
     }
 
-    // Parse all rows of the group first — a bad row skips just that row.
-    const parsed: { entry: Record<string, unknown>; sheetRowNumber: number }[] = [];
-    for (const { raw, sheetRowNumber } of rows) {
-      const entryDate = parseDate(raw[ledCol("Date") ?? -1]);
-      if (!entryDate || entryDate === "invalid") {
-        rowsSkipped++;
-        issues.push({ sheet_row_number: sheetRowNumber, issue_type: "bad_date", message: `Unreadable Date — row skipped`, raw_row_data: raw });
-        continue;
-      }
-      const numbers: Record<string, number | null> = {};
+    positionsByInvestorId.set(investor.id, { code, vehicleId, invested: investedAmount, current: currentValue, sheetRowNumber });
+  }
+
+  // ---------- Accounts tab: per-investor NAV ledger blocks ----------
+  const ledgerByInvestorId = new Map<string, { entries: ParsedLedgerEntry[]; sheetRowNumber: number }>();
+
+  let accountsRows: string[][] = [];
+  try {
+    accountsRows = await readSheetTab(ACCOUNTS_TAB);
+  } catch (err) {
+    issues.push({ sheet_row_number: null, issue_type: "accounts_tab_unreadable", message: `Could not read the "${ACCOUNTS_TAB}" tab — ledger detail skipped this run: ${(err as Error).message}` });
+  }
+
+  for (let r = 0; r < accountsRows.length; r++) {
+    const row = accountsRows[r];
+    const cellA = (row[0] ?? "").trim();
+    const restEmpty = row.slice(1).every((c) => !c || !c.trim());
+    if (!cellA || !restEmpty) continue; // not a candidate block-name row
+
+    const headerRow = accountsRows[r + 1];
+    const nextCellA = (headerRow?.[0] ?? "").trim();
+    if (normalizeHeader(nextCellA) !== normalizeHeader("Date")) continue; // not followed by a header row
+
+    const blockNameRowNumber = r + 1;
+    const ledCol = indexHeaders(headerRow);
+
+    const entries: ParsedLedgerEntry[] = [];
+    let i = r + 2;
+    for (; i < accountsRows.length; i++) {
+      const dataRow = accountsRows[i];
+      const entryDate = parseDate(dataRow[ledCol("Date") ?? -1]);
+      if (entryDate === null || entryDate === "invalid") break; // end of block
+
+      rowsRead++;
+      const numbers: Partial<Record<keyof ParsedLedgerEntry, number | null>> = {};
       let bad = false;
-      for (const [field, header] of [
-        ["units_change", "Units Change"],
-        ["total_units", "Total Units"],
-        ["paid_in_change", "Paid In Change"],
-        ["total_paid_in", "Total Paid In"],
-        ["gain_loss_change", "Gain/Loss Change"],
-        ["total_gain_loss", "Total Gain/Loss"],
-        ["capital_change", "Capital Change"],
-        ["total_capital", "Total Capital"],
-        ["nav_per_unit", "NAV per Unit"],
-      ] as const) {
-        const value = parseNumber(raw[ledCol(header) ?? -1]);
+      for (const [field, header] of LEDGER_NUMBER_FIELDS) {
+        const value = parseNumber(dataRow[ledCol(header) ?? -1]);
         if (value === "invalid") {
-          issues.push({ sheet_row_number: sheetRowNumber, issue_type: "bad_number", message: `Unreadable number in "${header}" — row skipped`, raw_row_data: raw });
+          issues.push({ sheet_row_number: i + 1, issue_type: "bad_number", message: `"${cellA}": unreadable number in "${header}" — row skipped`, raw_row_data: dataRow });
           bad = true;
           break;
         }
@@ -323,66 +350,76 @@ export async function runSync(
         rowsSkipped++;
         continue;
       }
-      parsed.push({
-        sheetRowNumber,
-        entry: {
-          entry_date: entryDate,
-          transaction_type: (raw[ledCol("Transaction") ?? -1] ?? "").trim() || "—",
-          remarks: (raw[ledCol("Remarks") ?? -1] ?? "").trim() || null,
-          source_sheet_row: sheetRowNumber,
-          ...numbers,
-        },
+      entries.push({
+        entry_date: entryDate,
+        transaction_type: (dataRow[ledCol("Transaction") ?? -1] ?? "").trim() || "—",
+        units_change: numbers.units_change ?? null,
+        total_units: numbers.total_units ?? null,
+        paid_in_change: numbers.paid_in_change ?? null,
+        total_paid_in: numbers.total_paid_in ?? null,
+        gain_loss_change: numbers.gain_loss_change ?? null,
+        total_gain_loss: numbers.total_gain_loss ?? null,
+        capital_change: numbers.capital_change ?? null,
+        total_capital: numbers.total_capital ?? null,
+        nav_per_unit: numbers.nav_per_unit ?? null,
       });
     }
+    r = i - 1; // resume the outer scan right after this block
 
-    if (!parsed.length) continue;
+    if (!entries.length) continue;
 
-    const first = parsed[0].entry as { nav_per_unit: number | null };
-    const last = parsed[parsed.length - 1].entry as {
-      nav_per_unit: number | null;
-      total_capital: number | null;
-      total_paid_in: number | null;
-      entry_date: string;
-    };
+    const investor = byNormalizedName.get(normalizeName(cellA));
+    if (!investor) {
+      issues.push({ sheet_row_number: blockNameRowNumber, issue_type: "ledger_block_unmatched", message: `"${ACCOUNTS_TAB}" block "${cellA}" doesn't match any investor on "${MAIN_TAB}" — ledger detail skipped` });
+      continue;
+    }
+    ledgerByInvestorId.set(investor.id, { entries, sheetRowNumber: blockNameRowNumber });
+  }
+
+  // ---------- Write positions (ledger-derived where available) ----------
+  for (const [investorId, pos] of positionsByInvestorId) {
+    const ledger = ledgerByInvestorId.get(investorId);
+
+    const positionFields = ledger?.entries.length
+      ? {
+          nav_at_allocation: ledger.entries[0].nav_per_unit,
+          latest_nav: ledger.entries[ledger.entries.length - 1].nav_per_unit,
+          current_valuation: ledger.entries[ledger.entries.length - 1].total_capital,
+          total_invested: ledger.entries[ledger.entries.length - 1].total_paid_in,
+          valuation_date: ledger.entries[ledger.entries.length - 1].entry_date,
+        }
+      : { current_valuation: pos.current, total_invested: pos.invested };
 
     const { data: position, error: posError } = await admin
       .from("investor_vehicle_positions")
       .upsert(
-        {
-          investor_id: investorId,
-          vehicle_id: vehicleId,
-          nav_at_allocation: first.nav_per_unit,
-          latest_nav: last.nav_per_unit,
-          current_valuation: last.total_capital, // last row's Total Capital IS the current value
-          total_invested: last.total_paid_in, // last row's Total Paid In IS the amount invested
-          valuation_date: last.entry_date,
-          last_synced_at: new Date().toISOString(),
-        },
+        { investor_id: investorId, vehicle_id: pos.vehicleId, ...positionFields, last_synced_at: new Date().toISOString() },
         { onConflict: "investor_id,vehicle_id" },
       )
       .select("id")
       .single();
 
     if (posError || !position) {
-      rowsSkipped += parsed.length;
-      issues.push({ sheet_row_number: parsed[0].sheetRowNumber, issue_type: "position_failed", message: `Position for ${code} / ${vehicleName}: ${posError?.message}` });
+      rowsSkipped++;
+      issues.push({ sheet_row_number: pos.sheetRowNumber, issue_type: "position_failed", message: `Position for ${pos.code}: ${posError?.message}` });
       continue;
     }
 
-    // The sheet is the source of truth: rebuild this position's ledger.
-    await admin.from("ledger_entries").delete().eq("position_id", position.id);
-    const { error: insertError } = await admin.from("ledger_entries").insert(
-      parsed.map((p, i) => ({ ...p.entry, position_id: position.id, sort_order: i + 1 })),
-    );
-    if (insertError) {
-      rowsSkipped += parsed.length;
-      issues.push({ sheet_row_number: parsed[0].sheetRowNumber, issue_type: "ledger_insert_failed", message: `${code} / ${vehicleName}: ${insertError.message}` });
-      continue;
+    if (ledger?.entries.length) {
+      await admin.from("ledger_entries").delete().eq("position_id", position.id);
+      const { error: insertError } = await admin
+        .from("ledger_entries")
+        .insert(ledger.entries.map((e, i) => ({ ...e, position_id: position.id, sort_order: i + 1 })));
+      if (insertError) {
+        rowsSkipped += ledger.entries.length;
+        issues.push({ sheet_row_number: ledger.sheetRowNumber, issue_type: "ledger_insert_failed", message: `${pos.code}: ${insertError.message}` });
+        continue;
+      }
+      rowsUpserted += ledger.entries.length;
     }
-    rowsUpserted += parsed.length;
   }
 
-  const INFO_ISSUES = new Set(["new_vehicle_created", "login_authorized"]);
+  const INFO_ISSUES = new Set(["new_investor_created", "ledger_block_unmatched"]);
   const hasBlockingIssues = issues.some((i) => !INFO_ISSUES.has(i.issue_type));
   return finish(hasBlockingIssues ? "partial_failure" : "success");
 }
