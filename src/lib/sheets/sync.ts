@@ -21,9 +21,15 @@ import { readSheetTab, sheetsConfigured } from "./client";
 // Gain/Loss | Total Capital Change | Total Capital | NAV per Unit), then
 // that investor's ledger rows, until a row whose Date column doesn't parse
 // (blank row, or a "CURRENT VALUE AS OF ..." summary line) ends the block.
-// Investors with no block (e.g. today, all Al Maha investors) get their
+// Investors with no block (e.g. all Al Maha investors, today) get their
 // position from the main tab's Invested Amount / Current Value directly,
 // with no ledger detail.
+//
+// The main tab's Invested Amount / Current Value are ALWAYS authoritative
+// for a position's headline numbers, whether or not a ledger block exists
+// — a stale/unedited ledger block never overrides an edit made on the main
+// tab. Ledger data only supplies supplementary stats (NAV, valuation date)
+// for the statement view.
 //
 // Investors are matched to existing DB rows by normalized name — this
 // sheet has no stable per-row ID column. An unmatched name gets a freshly
@@ -83,18 +89,25 @@ function parseNumber(raw: string | undefined): number | null | "invalid" {
   return Number.isFinite(n) ? n : "invalid";
 }
 
+const MONTH_NUMBERS: Record<string, string> = {
+  january: "01", february: "02", march: "03", april: "04", may: "05", june: "06",
+  july: "07", august: "08", september: "09", october: "10", november: "11", december: "12",
+};
+
 function parseDate(raw: string | undefined): string | null | "invalid" {
   if (!raw || !raw.trim()) return null;
   const trimmed = raw.trim();
   if (/^\d{4}-\d{2}-\d{2}$/.test(trimmed)) return trimmed;
-  // "May 01, 2026" and similar — the WHOLE cell must look like a date, not
-  // just contain one (otherwise a summary line like "CURRENT VALUE AS OF
-  // MAY 31, 2026" parses too, since new Date() extracts a date from within
-  // a longer sentence).
-  if (/^[A-Za-z]+\.? \d{1,2},? \d{4}$/.test(trimmed)) {
-    const parsed = new Date(trimmed);
-    if (!Number.isNaN(parsed.getTime())) {
-      return parsed.toISOString().slice(0, 10);
+  // "May 01, 2026" / "May 1, 2026" — parsed manually (month-name lookup,
+  // no Date object / no toISOString() round-trip) so it can't shift by a
+  // day when the server's local timezone is ahead of UTC. The WHOLE cell
+  // must look like a date, not just contain one (otherwise a summary line
+  // like "CURRENT VALUE AS OF MAY 31, 2026" would match too).
+  const match = /^([A-Za-z]+)\.? (\d{1,2}),? (\d{4})$/.exec(trimmed);
+  if (match) {
+    const month = MONTH_NUMBERS[match[1].toLowerCase()];
+    if (month) {
+      return `${match[3]}-${month}-${match[2].padStart(2, "0")}`;
     }
   }
   return "invalid";
@@ -380,15 +393,23 @@ export async function runSync(
   for (const [investorId, pos] of positionsByInvestorId) {
     const ledger = ledgerByInvestorId.get(investorId);
 
-    const positionFields = ledger?.entries.length
-      ? {
-          nav_at_allocation: ledger.entries[0].nav_per_unit,
-          latest_nav: ledger.entries[ledger.entries.length - 1].nav_per_unit,
-          current_valuation: ledger.entries[ledger.entries.length - 1].total_capital,
-          total_invested: ledger.entries[ledger.entries.length - 1].total_paid_in,
-          valuation_date: ledger.entries[ledger.entries.length - 1].entry_date,
-        }
-      : { current_valuation: pos.current, total_invested: pos.invested };
+    // The main tab's Invested Amount / Current Value are always
+    // authoritative — they're what admins actually edit. Ledger data (when
+    // present) only supplies supplementary stats (NAV, valuation date) for
+    // the statement view; it never overrides the headline numbers, so a
+    // stale or out-of-sync ledger block can't silently mask an edit made
+    // on the main tab.
+    const positionFields = {
+      current_valuation: pos.current,
+      total_invested: pos.invested,
+      ...(ledger?.entries.length
+        ? {
+            nav_at_allocation: ledger.entries[0].nav_per_unit,
+            latest_nav: ledger.entries[ledger.entries.length - 1].nav_per_unit,
+            valuation_date: ledger.entries[ledger.entries.length - 1].entry_date,
+          }
+        : {}),
+    };
 
     const { data: position, error: posError } = await admin
       .from("investor_vehicle_positions")
