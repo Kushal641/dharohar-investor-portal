@@ -56,6 +56,11 @@ export default async function AdminInvestorsPage() {
                 <td className="px-4 py-2.5 text-zinc-600">{inv.referral_sources?.name ?? "—"}</td>
                 <td className="px-4 py-2.5 text-center text-zinc-600">
                   {inv.investor_auth_links.length}
+                  {inv.investor_auth_links.length >= 2 && (
+                    <span className="ml-1.5 rounded-full bg-blue-50 px-2 py-0.5 text-xs text-blue-700">
+                      Joint
+                    </span>
+                  )}
                 </td>
                 <td className="px-4 py-2.5 text-right tabular-nums">
                   {num(

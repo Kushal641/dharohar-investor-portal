@@ -13,7 +13,6 @@ const MESSAGES: Record<string, string> = {
 };
 
 const ERRORS: Record<string, string> = {
-  password_short: "Temporary password must be at least 8 characters.",
   reset_failed: "Couldn't reset the password.",
   not_internal: "Only internal users can be managed here.",
 };
@@ -24,6 +23,12 @@ export default async function AdminUsersPage({
   searchParams: Promise<Record<string, string | undefined>>;
 }) {
   const sp = await searchParams;
+  const errorMessage =
+    sp.error === "policy" && sp.detail
+      ? sp.detail
+      : sp.error
+        ? (ERRORS[sp.error] ?? "Something went wrong.")
+        : null;
   // Admin-gated by the layout; service-role client so we can read auth emails.
   const admin = createAdminClient();
 
@@ -61,10 +66,8 @@ export default async function AdminUsersPage({
           {MESSAGES[message]}
         </p>
       )}
-      {sp.error && (
-        <p className="mt-4 rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">
-          {ERRORS[sp.error] ?? "Something went wrong."}
-        </p>
+      {errorMessage && (
+        <p className="mt-4 rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">{errorMessage}</p>
       )}
 
       <div className="mt-6 space-y-3">
@@ -83,9 +86,14 @@ export default async function AdminUsersPage({
                 <p className="text-xs text-zinc-500">{user.email}</p>
               </div>
               <div className="flex items-center gap-3 text-sm">
-                <form action={setInternalUserDisabled}>
+                <form action={setInternalUserDisabled} className="flex items-center gap-2">
                   <input type="hidden" name="authUserId" value={user.id} />
                   <input type="hidden" name="disable" value={user.is_disabled ? "0" : "1"} />
+                  <input
+                    name="reason"
+                    placeholder="Reason (optional)"
+                    className="w-36 rounded-md border border-zinc-200 px-2 py-1 text-xs focus:border-[#f4511e] focus:outline-none"
+                  />
                   <button type="submit" className="text-zinc-500 hover:text-zinc-700">
                     {user.is_disabled ? "Enable" : "Disable"}
                   </button>

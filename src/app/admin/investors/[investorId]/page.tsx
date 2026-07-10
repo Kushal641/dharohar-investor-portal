@@ -2,17 +2,17 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { setLoginDisabled, resetAccess, deleteLogin } from "../actions";
+import { setLoginDisabled, resetAccess, deleteLogin, addLogin } from "../actions";
 
 export default async function ManageInvestorAccessPage({
   params,
   searchParams,
 }: {
   params: Promise<{ investorId: string }>;
-  searchParams: Promise<{ reset_done?: string }>;
+  searchParams: Promise<{ reset_done?: string; add_login?: string }>;
 }) {
   const { investorId } = await params;
-  const { reset_done } = await searchParams;
+  const { reset_done, add_login } = await searchParams;
   const supabase = await createClient();
 
   const { data: investor } = await supabase
@@ -95,10 +95,34 @@ export default async function ManageInvestorAccessPage({
         </p>
       )}
 
+      {add_login === "created" && (
+        <p className="mt-4 rounded-md bg-green-50 px-3 py-2 text-sm text-green-800">
+          Login added. The investor can now use &quot;Activate your account&quot; on the login
+          page to receive a one-time code and set a password.
+        </p>
+      )}
+      {add_login === "existing" && (
+        <p className="mt-4 rounded-md bg-zinc-50 px-3 py-2 text-sm text-zinc-700">
+          That email is already a login for this investor.
+        </p>
+      )}
+      {add_login === "conflict" && (
+        <p className="mt-4 rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">
+          That email is already used by a different account — resolve manually before adding it
+          here.
+        </p>
+      )}
+      {add_login === "bad_email" && (
+        <p className="mt-4 rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">
+          That doesn&apos;t look like a valid email address.
+        </p>
+      )}
+
       <section className="mt-8">
         <h3 className="text-base font-semibold text-zinc-900">Portal logins</h3>
         <p className="mt-1 text-sm text-zinc-500">
-          Logins are authorized automatically from the sheet&apos;s Email / Email 2 columns.
+          Logins are authorized automatically from the sheet&apos;s Email / Email 2 columns, or
+          added manually below — for joint accounts, add one login per holder.
         </p>
 
         <div className="mt-4 space-y-3">
@@ -133,10 +157,15 @@ export default async function ManageInvestorAccessPage({
                       Reset access
                     </button>
                   </form>
-                  <form action={setLoginDisabled}>
+                  <form action={setLoginDisabled} className="flex items-center gap-2">
                     <input type="hidden" name="authUserId" value={login.auth_user_id} />
                     <input type="hidden" name="back" value={back} />
                     <input type="hidden" name="disable" value={login.isDisabled ? "0" : "1"} />
+                    <input
+                      name="reason"
+                      placeholder="Reason (optional)"
+                      className="w-36 rounded-md border border-zinc-200 px-2 py-1 text-xs focus:border-[#f4511e] focus:outline-none"
+                    />
                     <button type="submit" className="text-zinc-500 hover:text-zinc-700">
                       {login.isDisabled ? "Enable" : "Disable"}
                     </button>
@@ -154,8 +183,8 @@ export default async function ManageInvestorAccessPage({
           ))}
           {!loginRows.length && (
             <p className="rounded-md border border-dashed border-zinc-200 px-4 py-4 text-sm text-zinc-400">
-              No logins authorized yet — add the investor&apos;s email to the Google Sheet&apos;s
-              Email column and run a sync.
+              No logins authorized yet — add one below, or add the investor&apos;s email to the
+              Google Sheet&apos;s Email column and run a sync.
             </p>
           )}
         </div>
@@ -164,6 +193,43 @@ export default async function ManageInvestorAccessPage({
           next sync — remove the email from the sheet first. Use Disable to block access while
           keeping the login.
         </p>
+
+        <form action={addLogin} className="mt-6 flex flex-wrap items-end gap-3 rounded-md border border-zinc-100 p-4">
+          <input type="hidden" name="investorId" value={investor.id} />
+          <input type="hidden" name="back" value={back} />
+          <div>
+            <label className="block text-xs text-zinc-500" htmlFor="add-login-email">
+              Add a login — email
+            </label>
+            <input
+              id="add-login-email"
+              name="email"
+              type="email"
+              required
+              placeholder="name@example.com"
+              className="mt-1 w-64 rounded-md border border-zinc-200 px-2 py-1.5 text-sm focus:border-[#f4511e] focus:outline-none"
+            />
+          </div>
+          <div>
+            <label className="block text-xs text-zinc-500" htmlFor="add-login-label">
+              Holder
+            </label>
+            <select
+              id="add-login-label"
+              name="label"
+              className="mt-1 rounded-md border border-zinc-200 px-2 py-1.5 text-sm focus:border-[#f4511e] focus:outline-none"
+            >
+              <option value="Primary holder">Primary holder</option>
+              <option value="Joint holder">Joint holder</option>
+            </select>
+          </div>
+          <button
+            type="submit"
+            className="rounded-md bg-zinc-900 px-3 py-1.5 text-sm text-white hover:bg-zinc-700"
+          >
+            Add login
+          </button>
+        </form>
       </section>
     </div>
   );

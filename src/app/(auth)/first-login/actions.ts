@@ -3,17 +3,11 @@
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { validatePassword } from "@/lib/password-policy";
 
 export async function completeFirstLogin(formData: FormData) {
   const password = String(formData.get("password") ?? "");
   const confirmPassword = String(formData.get("confirmPassword") ?? "");
-
-  if (password.length < 8) {
-    redirect("/first-login?error=too_short");
-  }
-  if (password !== confirmPassword) {
-    redirect("/first-login?error=mismatch");
-  }
 
   const supabase = await createClient();
   const {
@@ -22,6 +16,20 @@ export async function completeFirstLogin(formData: FormData) {
 
   if (!user) {
     redirect("/login");
+  }
+
+  const { data: profile } = await supabase
+    .from("user_profiles")
+    .select("role")
+    .eq("id", user.id)
+    .single();
+
+  const policyError = validatePassword(password, { isAdmin: profile?.role === "admin" });
+  if (policyError) {
+    redirect(`/first-login?error=policy&detail=${encodeURIComponent(policyError)}`);
+  }
+  if (password !== confirmPassword) {
+    redirect("/first-login?error=mismatch");
   }
 
   const { error: updateError } = await supabase.auth.updateUser({ password });

@@ -1,7 +1,7 @@
 import { completeFirstLogin } from "./actions";
+import { PASSWORD_HINT } from "@/lib/password-policy";
 
 const ERROR_MESSAGES: Record<string, string> = {
-  too_short: "Password must be at least 8 characters.",
   mismatch: "Passwords don't match.",
   update_failed: "Couldn't set your new password. Please try again.",
 };
@@ -9,20 +9,25 @@ const ERROR_MESSAGES: Record<string, string> = {
 export default async function FirstLoginPage({
   searchParams,
 }: {
-  searchParams: Promise<{ error?: string }>;
+  searchParams: Promise<{ error?: string; detail?: string }>;
 }) {
-  const { error } = await searchParams;
+  const { error, detail } = await searchParams;
+  const errorMessage =
+    error === "policy" && detail
+      ? detail
+      : error
+        ? (ERROR_MESSAGES[error] ?? "Something went wrong. Please try again.")
+        : null;
 
   return (
     <div>
       <p className="mb-4 text-sm text-zinc-600">
         This is your first login. Please set a new password before continuing.
       </p>
+      <p className="mb-4 text-xs text-zinc-500">{PASSWORD_HINT}</p>
       <form action={completeFirstLogin} className="space-y-4">
-        {error && (
-          <p className="rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">
-            {ERROR_MESSAGES[error] ?? "Something went wrong. Please try again."}
-          </p>
+        {errorMessage && (
+          <p className="rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">{errorMessage}</p>
         )}
         <div>
           <label htmlFor="password" className="block text-sm font-medium text-zinc-700">
@@ -34,6 +39,7 @@ export default async function FirstLoginPage({
             type="password"
             required
             minLength={8}
+            maxLength={64}
             autoComplete="new-password"
             className="mt-1 w-full rounded-md border border-zinc-300 px-3 py-2 text-sm focus:border-[#f4511e] focus:outline-none focus:ring-1 focus:ring-[#f4511e]"
           />
@@ -48,6 +54,7 @@ export default async function FirstLoginPage({
             type="password"
             required
             minLength={8}
+            maxLength={64}
             autoComplete="new-password"
             className="mt-1 w-full rounded-md border border-zinc-300 px-3 py-2 text-sm focus:border-[#f4511e] focus:outline-none focus:ring-1 focus:ring-[#f4511e]"
           />

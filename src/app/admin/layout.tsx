@@ -1,6 +1,7 @@
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { PortalShell } from "@/components/portal-shell";
+import { ADMIN_NAV_ITEMS } from "@/lib/admin/nav";
 
 export default async function AdminLayout({ children }: { children: React.ReactNode }) {
   const supabase = await createClient();
@@ -18,16 +19,7 @@ export default async function AdminLayout({ children }: { children: React.ReactN
   if (!profile || profile.role !== "admin") redirect("/login");
 
   return (
-    <PortalShell
-      sectionLabel="Admin Panel"
-      navItems={[
-        { href: "/admin/dashboard", label: "Overview" },
-        { href: "/admin/investors", label: "Investors" },
-        { href: "/admin/users", label: "Users" },
-        { href: "/admin/sync", label: "Sync" },
-        { href: "/internal/investors", label: "Reports" },
-      ]}
-    >
+    <PortalShell sectionLabel="Admin Panel" navItems={ADMIN_NAV_ITEMS}>
       {children}
     </PortalShell>
   );

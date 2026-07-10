@@ -2,13 +2,16 @@
 
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
+import { validatePassword } from "@/lib/password-policy";
 
 export async function changePassword(formData: FormData) {
   const password = String(formData.get("password") ?? "");
   const confirmPassword = String(formData.get("confirmPassword") ?? "");
 
-  if (password.length < 8) {
-    redirect("/account?error=too_short");
+  // This page sits in the investor route group, so the standard policy applies.
+  const policyError = validatePassword(password);
+  if (policyError) {
+    redirect(`/account?error=policy&detail=${encodeURIComponent(policyError)}`);
   }
   if (password !== confirmPassword) {
     redirect("/account?error=mismatch");

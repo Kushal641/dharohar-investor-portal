@@ -1,7 +1,14 @@
 import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
 
-const PUBLIC_PATHS = ["/login", "/activate", "/forgot-password", "/reset-password", "/auth/callback"];
+const PUBLIC_PATHS = [
+  "/login",
+  "/admin-login",
+  "/activate",
+  "/forgot-password",
+  "/reset-password",
+  "/auth/callback",
+];
 
 const ROLE_HOME: Record<string, string> = {
   investor: "/dashboard",
@@ -9,8 +16,23 @@ const ROLE_HOME: Record<string, string> = {
   admin: "/admin/dashboard",
 };
 
+// SOP v1.1 §12.3: idle timeout, shorter for the admin session.
+const IDLE_LIMIT_MS: Record<string, number> = {
+  admin: 30 * 60 * 1000,
+  internal: 60 * 60 * 1000,
+  investor: 60 * 60 * 1000,
+};
+
+const LAST_ACTIVE_COOKIE = "portal_last_active";
+
 function isInvestorSection(path: string) {
   return path.startsWith("/dashboard") || path.startsWith("/vehicles") || path.startsWith("/account");
+}
+
+function loginPathFor(role: string | null, path: string) {
+  // Unauthenticated hits on /admin paths go to the unlinked admin login.
+  if (role === "admin" || path.startsWith("/admin")) return "/admin-login";
+  return "/login";
 }
 
 export default async function proxy(request: NextRequest) {
@@ -45,12 +67,12 @@ export default async function proxy(request: NextRequest) {
   // Not signed in -> only public auth pages are reachable.
   if (!user && !isPublic) {
     const url = request.nextUrl.clone();
-    url.pathname = "/login";
+    url.pathname = loginPathFor(null, path);
     return NextResponse.redirect(url);
   }
 
-  // Signed in but hitting /login -> bounce to their home.
-  if (user && path === "/login") {
+  // Signed in but hitting a login screen -> bounce to their home.
+  if (user && (path === "/login" || path === "/admin-login")) {
     const url = request.nextUrl.clone();
     url.pathname = "/";
     return NextResponse.redirect(url);
@@ -71,6 +93,24 @@ export default async function proxy(request: NextRequest) {
       return NextResponse.redirect(url);
     }
 
+    const role = profile.role;
+
+    // Idle timeout (per role). The cookie tracks last activity; absence means
+    // the session just started.
+    const lastActiveRaw = request.cookies.get(LAST_ACTIVE_COOKIE)?.value;
+    const lastActive = lastActiveRaw ? Number(lastActiveRaw) : null;
+    const limit = IDLE_LIMIT_MS[role] ?? IDLE_LIMIT_MS.investor;
+    if (lastActive && Number.isFinite(lastActive) && Date.now() - lastActive > limit) {
+      await supabase.auth.signOut();
+      const url = request.nextUrl.clone();
+      url.pathname = loginPathFor(role, path);
+      url.search = "";
+      url.searchParams.set("error", "session_expired");
+      const redirect = NextResponse.redirect(url);
+      redirect.cookies.delete(LAST_ACTIVE_COOKIE);
+      return redirect;
+    }
+
     if (profile.must_change_password && path !== "/first-login") {
       const url = request.nextUrl.clone();
       url.pathname = "/first-login";
@@ -79,13 +119,23 @@ export default async function proxy(request: NextRequest) {
 
     if (!profile.must_change_password && path === "/first-login") {
       const url = request.nextUrl.clone();
-      url.pathname = ROLE_HOME[profile.role] ?? "/login";
+      url.pathname = ROLE_HOME[role] ?? "/login";
       return NextResponse.redirect(url);
+    }
+
+    // Admin with an enrolled TOTP factor must have completed the challenge
+    // (AAL2) before reaching any /admin screen. aal check is cheap (local JWT).
+    if (role === "admin" && path.startsWith("/admin")) {
+      const { data: aal } = await supabase.auth.mfa.getAuthenticatorAssuranceLevel();
+      if (aal && aal.nextLevel === "aal2" && aal.currentLevel !== "aal2") {
+        const url = request.nextUrl.clone();
+        url.pathname = "/admin-login/mfa";
+        return NextResponse.redirect(url);
+      }
     }
 
     // Section guarding — defense in depth (RLS is the real boundary; this
     // just avoids showing the wrong role a page it has no data for).
-    const role = profile.role;
     const home = ROLE_HOME[role] ?? "/login";
 
     if (role !== "investor" && isInvestorSection(path)) {
@@ -97,6 +147,13 @@ export default async function proxy(request: NextRequest) {
     if (role === "internal" && path.startsWith("/admin")) {
       return NextResponse.redirect(new URL(home, request.url));
     }
+
+    // Record activity for the idle-timeout check.
+    response.cookies.set(LAST_ACTIVE_COOKIE, String(Date.now()), {
+      httpOnly: true,
+      sameSite: "lax",
+      path: "/",
+    });
   }
 
   return response;
