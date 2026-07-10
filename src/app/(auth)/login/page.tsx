@@ -6,7 +6,6 @@ const ERROR_MESSAGES: Record<string, string> = {
   invalid: "Incorrect email or password.",
   disabled: "This account has been disabled. Contact the administrator.",
   no_profile: "This account isn't set up yet. Contact the administrator.",
-  session_expired: "You were logged out due to inactivity. Please log in again.",
 };
 
 export default async function LoginPage({

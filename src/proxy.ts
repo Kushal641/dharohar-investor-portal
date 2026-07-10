@@ -19,15 +19,6 @@ const ROLE_HOME: Record<string, string> = {
   admin: "/admin/dashboard",
 };
 
-// SOP v1.1 §12.3: idle timeout, shorter for the admin session.
-const IDLE_LIMIT_MS: Record<string, number> = {
-  admin: 30 * 60 * 1000,
-  internal: 60 * 60 * 1000,
-  investor: 60 * 60 * 1000,
-};
-
-const LAST_ACTIVE_COOKIE = "portal_last_active";
-
 function isInvestorSection(path: string) {
   return path.startsWith("/dashboard") || path.startsWith("/vehicles") || path.startsWith("/account");
 }
@@ -92,22 +83,6 @@ export default async function proxy(request: NextRequest) {
 
     const role = profile.role;
 
-    // Idle timeout (per role). The cookie tracks last activity; absence means
-    // the session just started.
-    const lastActiveRaw = request.cookies.get(LAST_ACTIVE_COOKIE)?.value;
-    const lastActive = lastActiveRaw ? Number(lastActiveRaw) : null;
-    const limit = IDLE_LIMIT_MS[role] ?? IDLE_LIMIT_MS.investor;
-    if (lastActive && Number.isFinite(lastActive) && Date.now() - lastActive > limit) {
-      await supabase.auth.signOut();
-      const url = request.nextUrl.clone();
-      url.pathname = "/login";
-      url.search = "";
-      url.searchParams.set("error", "session_expired");
-      const redirect = NextResponse.redirect(url);
-      redirect.cookies.delete(LAST_ACTIVE_COOKIE);
-      return redirect;
-    }
-
     if (profile.must_change_password && path !== "/first-login") {
       const url = request.nextUrl.clone();
       url.pathname = "/first-login";
@@ -144,13 +119,6 @@ export default async function proxy(request: NextRequest) {
     if (role === "internal" && path.startsWith("/admin")) {
       return NextResponse.redirect(new URL(home, request.url));
     }
-
-    // Record activity for the idle-timeout check.
-    response.cookies.set(LAST_ACTIVE_COOKIE, String(Date.now()), {
-      httpOnly: true,
-      sameSite: "lax",
-      path: "/",
-    });
   }
 
   return response;
