@@ -7,6 +7,10 @@ const PUBLIC_PATHS = [
   "/forgot-password",
   "/reset-password",
   "/auth/callback",
+  // Cron/API routes enforce their own auth (Bearer CRON_SECRET or an admin
+  // session) — the middleware's cookie-based gate would otherwise block
+  // Vercel Cron's request before it ever reaches that check.
+  "/api/sync/run",
 ];
 
 const ROLE_HOME: Record<string, string> = {
