@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { login } from "./actions";
+import { PasswordField } from "@/components/password-field";
 
 const ERROR_MESSAGES: Record<string, string> = {
   missing: "Enter your User ID email and password.",
@@ -35,19 +36,7 @@ export default async function LoginPage({
           className="mt-1 w-full rounded-md border border-zinc-300 px-3 py-2 text-sm focus:border-[#f4511e] focus:outline-none focus:ring-1 focus:ring-[#f4511e]"
         />
       </div>
-      <div>
-        <label htmlFor="password" className="block text-sm font-medium text-zinc-700">
-          Password
-        </label>
-        <input
-          id="password"
-          name="password"
-          type="password"
-          required
-          autoComplete="current-password"
-          className="mt-1 w-full rounded-md border border-zinc-300 px-3 py-2 text-sm focus:border-[#f4511e] focus:outline-none focus:ring-1 focus:ring-[#f4511e]"
-        />
-      </div>
+      <PasswordField label="Password" name="password" required autoComplete="current-password" />
       <button
         type="submit"
         className="w-full rounded-md bg-[#f4511e] px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-[#d8430f]"
