@@ -5,10 +5,12 @@ import { logout } from "@/lib/auth/logout-action";
 
 export function PortalShell({
   sectionLabel,
+  badge,
   navItems,
   children,
 }: {
   sectionLabel: string;
+  badge?: string;
   navItems: { href: string; label: string }[];
   children: React.ReactNode;
 }) {
@@ -23,6 +25,11 @@ export function PortalShell({
             </Link>
             <div className="h-8 w-px bg-zinc-200" />
             <p className="text-sm font-semibold text-zinc-900">{sectionLabel}</p>
+            {badge && (
+              <span className="rounded-full bg-amber-50 px-2 py-0.5 text-xs font-medium text-amber-700">
+                {badge}
+              </span>
+            )}
           </div>
           <nav className="flex items-center gap-5">
             {navItems.map((item) => (

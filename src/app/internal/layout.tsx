@@ -16,14 +16,18 @@ export default async function InternalLayout({ children }: { children: React.Rea
     .eq("id", user.id)
     .single();
 
-  if (!profile || !["internal", "admin"].includes(profile.role)) redirect("/login");
+  if (!profile || !["internal", "admin", "founder"].includes(profile.role)) redirect("/login");
 
   const isAdmin = profile.role === "admin";
+  const isFounder = profile.role === "founder";
 
   return (
     <PortalShell
-      sectionLabel={isAdmin ? "Admin Panel" : "Internal Dashboard"}
-      navItems={isAdmin ? ADMIN_NAV_ITEMS : [{ href: "/internal/investors", label: "Investors" }]}
+      sectionLabel={isAdmin || isFounder ? "Admin Panel" : "Internal Dashboard"}
+      badge={isFounder ? "Founder — read only" : undefined}
+      navItems={
+        isAdmin || isFounder ? ADMIN_NAV_ITEMS : [{ href: "/internal/investors", label: "Investors" }]
+      }
     >
       {children}
     </PortalShell>

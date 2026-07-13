@@ -2,6 +2,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { isReadOnlyViewer } from "@/lib/admin/guard";
 import { setLoginDisabled, resetAccess, deleteLogin, addLogin } from "../actions";
 
 export default async function ManageInvestorAccessPage({
@@ -14,6 +15,7 @@ export default async function ManageInvestorAccessPage({
   const { investorId } = await params;
   const { reset_done, add_login } = await searchParams;
   const supabase = await createClient();
+  const readOnly = await isReadOnlyViewer();
 
   const { data: investor } = await supabase
     .from("investors")
@@ -149,35 +151,37 @@ export default async function ManageInvestorAccessPage({
                       ` · last sign-in ${new Date(login.lastSignIn).toLocaleDateString("en-US", { month: "short", day: "2-digit", year: "numeric" })}`}
                   </p>
                 </div>
-                <div className="flex items-center gap-3 text-sm">
-                  <form action={resetAccess}>
-                    <input type="hidden" name="authUserId" value={login.auth_user_id} />
-                    <input type="hidden" name="back" value={back} />
-                    <button type="submit" className="text-zinc-500 hover:text-zinc-700">
-                      Reset access
-                    </button>
-                  </form>
-                  <form action={setLoginDisabled} className="flex items-center gap-2">
-                    <input type="hidden" name="authUserId" value={login.auth_user_id} />
-                    <input type="hidden" name="back" value={back} />
-                    <input type="hidden" name="disable" value={login.isDisabled ? "0" : "1"} />
-                    <input
-                      name="reason"
-                      placeholder="Reason (optional)"
-                      className="w-36 rounded-md border border-zinc-200 px-2 py-1 text-xs focus:border-[#f4511e] focus:outline-none"
-                    />
-                    <button type="submit" className="text-zinc-500 hover:text-zinc-700">
-                      {login.isDisabled ? "Enable" : "Disable"}
-                    </button>
-                  </form>
-                  <form action={deleteLogin}>
-                    <input type="hidden" name="authUserId" value={login.auth_user_id} />
-                    <input type="hidden" name="back" value={back} />
-                    <button type="submit" className="text-red-500 hover:text-red-700">
-                      Delete
-                    </button>
-                  </form>
-                </div>
+                {!readOnly && (
+                  <div className="flex items-center gap-3 text-sm">
+                    <form action={resetAccess}>
+                      <input type="hidden" name="authUserId" value={login.auth_user_id} />
+                      <input type="hidden" name="back" value={back} />
+                      <button type="submit" className="text-zinc-500 hover:text-zinc-700">
+                        Reset access
+                      </button>
+                    </form>
+                    <form action={setLoginDisabled} className="flex items-center gap-2">
+                      <input type="hidden" name="authUserId" value={login.auth_user_id} />
+                      <input type="hidden" name="back" value={back} />
+                      <input type="hidden" name="disable" value={login.isDisabled ? "0" : "1"} />
+                      <input
+                        name="reason"
+                        placeholder="Reason (optional)"
+                        className="w-36 rounded-md border border-zinc-200 px-2 py-1 text-xs focus:border-[#f4511e] focus:outline-none"
+                      />
+                      <button type="submit" className="text-zinc-500 hover:text-zinc-700">
+                        {login.isDisabled ? "Enable" : "Disable"}
+                      </button>
+                    </form>
+                    <form action={deleteLogin}>
+                      <input type="hidden" name="authUserId" value={login.auth_user_id} />
+                      <input type="hidden" name="back" value={back} />
+                      <button type="submit" className="text-red-500 hover:text-red-700">
+                        Delete
+                      </button>
+                    </form>
+                  </div>
+                )}
               </div>
             </div>
           ))}
@@ -194,42 +198,44 @@ export default async function ManageInvestorAccessPage({
           keeping the login.
         </p>
 
-        <form action={addLogin} className="mt-6 flex flex-wrap items-end gap-3 rounded-md border border-zinc-100 p-4">
-          <input type="hidden" name="investorId" value={investor.id} />
-          <input type="hidden" name="back" value={back} />
-          <div>
-            <label className="block text-xs text-zinc-500" htmlFor="add-login-email">
-              Add a login — email
-            </label>
-            <input
-              id="add-login-email"
-              name="email"
-              type="email"
-              required
-              placeholder="name@example.com"
-              className="mt-1 w-64 rounded-md border border-zinc-200 px-2 py-1.5 text-sm focus:border-[#f4511e] focus:outline-none"
-            />
-          </div>
-          <div>
-            <label className="block text-xs text-zinc-500" htmlFor="add-login-label">
-              Holder
-            </label>
-            <select
-              id="add-login-label"
-              name="label"
-              className="mt-1 rounded-md border border-zinc-200 px-2 py-1.5 text-sm focus:border-[#f4511e] focus:outline-none"
+        {!readOnly && (
+          <form action={addLogin} className="mt-6 flex flex-wrap items-end gap-3 rounded-md border border-zinc-100 p-4">
+            <input type="hidden" name="investorId" value={investor.id} />
+            <input type="hidden" name="back" value={back} />
+            <div>
+              <label className="block text-xs text-zinc-500" htmlFor="add-login-email">
+                Add a login — email
+              </label>
+              <input
+                id="add-login-email"
+                name="email"
+                type="email"
+                required
+                placeholder="name@example.com"
+                className="mt-1 w-64 rounded-md border border-zinc-200 px-2 py-1.5 text-sm focus:border-[#f4511e] focus:outline-none"
+              />
+            </div>
+            <div>
+              <label className="block text-xs text-zinc-500" htmlFor="add-login-label">
+                Holder
+              </label>
+              <select
+                id="add-login-label"
+                name="label"
+                className="mt-1 rounded-md border border-zinc-200 px-2 py-1.5 text-sm focus:border-[#f4511e] focus:outline-none"
+              >
+                <option value="Primary holder">Primary holder</option>
+                <option value="Joint holder">Joint holder</option>
+              </select>
+            </div>
+            <button
+              type="submit"
+              className="rounded-md bg-zinc-900 px-3 py-1.5 text-sm text-white hover:bg-zinc-700"
             >
-              <option value="Primary holder">Primary holder</option>
-              <option value="Joint holder">Joint holder</option>
-            </select>
-          </div>
-          <button
-            type="submit"
-            className="rounded-md bg-zinc-900 px-3 py-1.5 text-sm text-white hover:bg-zinc-700"
-          >
-            Add login
-          </button>
-        </form>
+              Add login
+            </button>
+          </form>
+        )}
       </section>
     </div>
   );

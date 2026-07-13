@@ -1,5 +1,6 @@
 import { createClient } from "@/lib/supabase/server";
 import { sheetsConfigured } from "@/lib/sheets/client";
+import { isReadOnlyViewer } from "@/lib/admin/guard";
 import { syncNow } from "./actions";
 import { BUTTON_CLASS } from "@/components/form-controls";
 
@@ -24,6 +25,7 @@ function formatTimestamp(iso: string | null) {
 export default async function AdminSyncPage() {
   const supabase = await createClient();
   const configured = sheetsConfigured();
+  const readOnly = await isReadOnlyViewer();
 
   const { data: runs } = await supabase
     .from("sync_runs")
@@ -44,11 +46,13 @@ export default async function AdminSyncPage() {
             month; use the button for an immediate refresh.
           </p>
         </div>
-        <form action={syncNow}>
-          <button type="submit" className={BUTTON_CLASS} disabled={!configured}>
-            Sync now
-          </button>
-        </form>
+        {!readOnly && (
+          <form action={syncNow}>
+            <button type="submit" className={BUTTON_CLASS} disabled={!configured}>
+              Sync now
+            </button>
+          </form>
+        )}
       </div>
 
       {!configured && (

@@ -6,6 +6,7 @@
 //
 // Test accounts created (all passwords: Test-Pass-123):
 //   admin@dharohar-test.com      admin
+//   founder@dharohar-test.com    founder (same view as admin, read-only)
 //   internal@dharohar-test.com   internal (read-only)
 //   investor.a@dharohar-test.com investor — Ramesh Test (DCP-TEST-001)
 //   investor.a2@dharohar-test.com joint holder — same investor record as investor.a
@@ -76,6 +77,7 @@ async function ensureLink(investorId, authUserId, label) {
 async function main() {
   // --- users ---
   await ensureUser("admin@dharohar-test.com", "admin", "Test Admin");
+  await ensureUser("founder@dharohar-test.com", "founder", "Test Founder");
   await ensureUser("internal@dharohar-test.com", "internal", "Test Internal");
   const invA = await ensureUser("investor.a@dharohar-test.com", "investor", "Ramesh Test");
   const invA2 = await ensureUser("investor.a2@dharohar-test.com", "investor", "Ramesh Test (Joint)", true);

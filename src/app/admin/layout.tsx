@@ -16,10 +16,16 @@ export default async function AdminLayout({ children }: { children: React.ReactN
     .eq("id", user.id)
     .single();
 
-  if (!profile || profile.role !== "admin") redirect("/login");
+  if (!profile || !["admin", "founder"].includes(profile.role)) redirect("/login");
+
+  const isFounder = profile.role === "founder";
 
   return (
-    <PortalShell sectionLabel="Admin Panel" navItems={ADMIN_NAV_ITEMS}>
+    <PortalShell
+      sectionLabel="Admin Panel"
+      badge={isFounder ? "Founder — read only" : undefined}
+      navItems={ADMIN_NAV_ITEMS}
+    >
       {children}
     </PortalShell>
   );

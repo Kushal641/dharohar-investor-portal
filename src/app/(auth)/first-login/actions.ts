@@ -24,7 +24,9 @@ export async function completeFirstLogin(formData: FormData) {
     .eq("id", user.id)
     .single();
 
-  const policyError = validatePassword(password, { isAdmin: profile?.role === "admin" });
+  const policyError = validatePassword(password, {
+    isAdmin: profile?.role === "admin" || profile?.role === "founder",
+  });
   if (policyError) {
     redirect(`/first-login?error=policy&detail=${encodeURIComponent(policyError)}`);
   }

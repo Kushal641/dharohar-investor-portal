@@ -17,6 +17,7 @@ const ROLE_HOME: Record<string, string> = {
   investor: "/dashboard",
   internal: "/internal/investors",
   admin: "/admin/dashboard",
+  founder: "/admin/dashboard",
 };
 
 function isInvestorSection(path: string) {
@@ -95,9 +96,10 @@ export default async function proxy(request: NextRequest) {
       return NextResponse.redirect(url);
     }
 
-    // Admin with an enrolled TOTP factor must have completed the challenge
-    // (AAL2) before reaching any /admin screen. aal check is cheap (local JWT).
-    if (role === "admin" && path.startsWith("/admin")) {
+    // Admin/founder with an enrolled TOTP factor must have completed the
+    // challenge (AAL2) before reaching any /admin screen. aal check is cheap
+    // (local JWT).
+    if ((role === "admin" || role === "founder") && path.startsWith("/admin")) {
       const { data: aal } = await supabase.auth.mfa.getAuthenticatorAssuranceLevel();
       if (aal && aal.nextLevel === "aal2" && aal.currentLevel !== "aal2") {
         const url = request.nextUrl.clone();
