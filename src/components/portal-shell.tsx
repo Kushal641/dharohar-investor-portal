@@ -1,4 +1,6 @@
 import Link from "next/link";
+import Image from "next/image";
+import logo from "../../public/logo.png";
 import { logout } from "@/lib/auth/logout-action";
 
 export function PortalShell({
@@ -11,11 +13,15 @@ export function PortalShell({
   children: React.ReactNode;
 }) {
   return (
-    <div className="min-h-screen bg-white">
+    <div className="flex min-h-screen flex-col bg-white">
       <header className="border-b border-zinc-100">
+        <div className="h-1 bg-gradient-to-r from-brand-orange via-brand-blue to-brand-green" />
         <div className="mx-auto flex max-w-5xl items-center justify-between px-6 py-4">
-          <div>
-            <p className="text-xs font-medium tracking-wide text-zinc-500">DHAROHAR CAPITAL PARTNERS</p>
+          <div className="flex items-center gap-4">
+            <Link href="/" className="shrink-0">
+              <Image src={logo} alt="Dharohar Capital Partners" priority className="h-10 w-auto" />
+            </Link>
+            <div className="h-8 w-px bg-zinc-200" />
             <p className="text-sm font-semibold text-zinc-900">{sectionLabel}</p>
           </div>
           <nav className="flex items-center gap-5">
@@ -25,14 +31,20 @@ export function PortalShell({
               </Link>
             ))}
             <form action={logout}>
-              <button type="submit" className="text-sm text-zinc-500 hover:text-[#f4511e]">
+              <button type="submit" className="text-sm text-zinc-500 hover:text-brand-accent">
                 Log out
               </button>
             </form>
           </nav>
         </div>
       </header>
-      <main className="mx-auto max-w-5xl px-6 py-10">{children}</main>
+      <main className="mx-auto w-full max-w-5xl flex-1 px-6 py-10">{children}</main>
+      <footer className="border-t border-zinc-100">
+        <div className="mx-auto flex max-w-5xl flex-col items-center justify-between gap-1 px-6 py-6 text-xs text-zinc-400 sm:flex-row">
+          <p>© {new Date().getFullYear()} Dharohar Capital Partners. All rights reserved.</p>
+          <p>Confidential — for authorized investors only.</p>
+        </div>
+      </footer>
     </div>
   );
 }
