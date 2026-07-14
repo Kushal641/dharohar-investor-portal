@@ -43,8 +43,8 @@ export default async function AdminSyncPage() {
           <p className="mt-1 text-sm text-zinc-500">
             Pulls the master Google Sheet (tabs &quot;AIGF vs Al Maha&quot; and
             &quot;Accounts&quot;) and updates the portal, authorizing any new logins found in the
-            Email / Secondary Email columns. Runs automatically on the 1st of each month; use the
-            button for an immediate refresh.
+            Primary Email / Secondary Email columns. Runs automatically on the 1st of each month;
+            use the button for an immediate refresh.
           </p>
         </div>
         {!readOnly && (

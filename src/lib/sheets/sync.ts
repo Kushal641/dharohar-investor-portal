@@ -11,16 +11,19 @@ import { recordAudit } from "@/lib/admin/audit";
 // to be row 1, since the real sheet has title rows above it.
 //
 // Tab "AIGF vs Al Maha" (the investor list):
-//   S. No. | Name | Fund | Referral | Invested Amount | Current Value | Email | Secondary Email
+//   S. No. | Name | Account Type | Primary Email | Secondary Email | Mobile Number | Fund |
+//   Referral | Invested Amount | Current Value
 //   "Fund" is "AIGF" or "Al Maha" (mapped to the full vehicle name below,
 //   not stored verbatim). Rows stop at the first blank Name — everything
-//   below that on the tab is on-sheet summary formulas, not data.
-//   "Email" / "Secondary Email" are optional — when present, a portal login
-//   is authorized for each (Email -> "Primary holder", Secondary Email ->
-//   "Joint holder"), reusing the same authorizeLogin() the admin "Add
-//   login" action uses. This only ever ADDS logins: removing or changing an
-//   email in the sheet never disables or deletes the login that was created
-//   from it — that's a manual admin action (Investors -> Manage access).
+//   below that on the tab is on-sheet summary formulas/reference lists, not
+//   investor data.
+//   "Primary Email" / "Secondary Email" are optional — when present, a
+//   portal login is authorized for each (Primary Email -> "Primary holder",
+//   Secondary Email -> "Joint holder"), reusing the same authorizeLogin()
+//   the admin "Add login" action uses. This only ever ADDS logins: removing
+//   or changing an email in the sheet never disables or deletes the login
+//   that was created from it — that's a manual admin action (Investors ->
+//   Manage access).
 //
 // Tab "Accounts" (per-investor NAV ledger — stacked blocks, not one flat
 // table): a row with just the investor's name in column A, immediately
@@ -43,6 +46,17 @@ import { recordAudit } from "@/lib/admin/audit";
 // sheet has no stable per-row ID column. An unmatched name gets a freshly
 // minted "DCP-####" code (logged as an info issue so admins notice and can
 // sanity-check it wasn't just a name edit, not a genuinely new investor).
+//
+// Below the investor rows, the same "AIGF vs Al Maha" tab also carries two
+// small reference lists (arbitrary row position, found by scanning for the
+// header pair — not assumed to be at a fixed row):
+//   "Admin Names" | "Admin Email"     -> accounts created with role "admin"
+//   "Founder View" | "Founder Email"  -> accounts created with role "founder"
+// These grant the portal's two most-privileged roles, so unlike investor
+// logins, an email that already belongs to an account with a DIFFERENT role
+// is never auto-changed — it's flagged as a "role_conflict" issue for a
+// human to resolve. Like investor logins, removing a row here never
+// disables/deletes the account it created; that stays a manual admin step.
 // ============================================================
 
 type Issue = { sheet_row_number: number | null; issue_type: string; message: string; raw_row_data?: unknown };
@@ -87,6 +101,34 @@ function normalizeName(name: string) {
 }
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+// Finds a small two-column reference list anywhere in the tab by scanning
+// for adjacent cells matching (nameHeader, emailHeader) — the list's row
+// position isn't fixed, since it moves as the investor table above it
+// grows or shrinks. Reads rows below the header until both columns are
+// blank.
+function findLabeledBlock(rows: string[][], nameHeader: string, emailHeader: string) {
+  const results: { sheetRowNumber: number; displayName: string; email: string }[] = [];
+  for (let r = 0; r < rows.length; r++) {
+    const row = rows[r];
+    for (let c = 0; c < row.length - 1; c++) {
+      if (
+        normalizeHeader(row[c] ?? "") !== normalizeHeader(nameHeader) ||
+        normalizeHeader(row[c + 1] ?? "") !== normalizeHeader(emailHeader)
+      ) {
+        continue;
+      }
+      for (let i = r + 1; i < rows.length; i++) {
+        const displayName = (rows[i][c] ?? "").trim();
+        const email = (rows[i][c + 1] ?? "").trim();
+        if (!displayName && !email) break;
+        results.push({ sheetRowNumber: i + 1, displayName, email });
+      }
+      return results;
+    }
+  }
+  return results;
+}
 
 function parseNumber(raw: string | undefined): number | null | "invalid" {
   if (raw === undefined || raw.trim() === "") return null;
@@ -210,6 +252,103 @@ export async function runSync(
         message: `"${email}" for "${fullName}" is already used by a different account — resolve manually in Investors -> Manage access`,
       });
     }
+  }
+
+  // Authorize an Admin/Founder account from the sheet's reference lists.
+  // Unlike investor logins, an email that already belongs to an account
+  // with a DIFFERENT role is never changed automatically — that's a
+  // deliberate, human-only action for the portal's most-privileged roles.
+  async function authorizePrivilegedAccount(
+    email: string,
+    rawDisplayName: string,
+    role: "admin" | "founder",
+    sheetRowNumber: number,
+  ) {
+    const normalizedEmail = email.trim().toLowerCase();
+    if (!normalizedEmail) return;
+    const roleLabel = role === "admin" ? "Admin" : "Founder";
+    const displayName = rawDisplayName || normalizedEmail;
+
+    if (!EMAIL_RE.test(normalizedEmail)) {
+      issues.push({
+        sheet_row_number: sheetRowNumber,
+        issue_type: "bad_email",
+        message: `${roleLabel} list: "${email}" doesn't look like a valid email — account not created`,
+      });
+      return;
+    }
+
+    async function logCreated() {
+      issues.push({
+        sheet_row_number: sheetRowNumber,
+        issue_type: "account_created",
+        message: `${roleLabel} account created for "${displayName}" <${normalizedEmail}> — they can activate via "Activate your account" on the login page`,
+      });
+      await recordAudit({
+        actorUserId: triggeredByUser ?? null,
+        actorEmail: triggeredBy === "manual" ? undefined : "sheet sync (scheduled)",
+        action: `${role}_account_created`,
+        targetType: "internal_user",
+        targetEmail: normalizedEmail,
+        details: { source: "sheet_sync", role },
+      });
+    }
+
+    const { data: list } = await admin.auth.admin.listUsers({ perPage: 1000 });
+    const existingUser = list?.users.find((u) => u.email?.toLowerCase() === normalizedEmail);
+
+    if (existingUser) {
+      const { data: profile } = await admin
+        .from("user_profiles")
+        .select("role")
+        .eq("id", existingUser.id)
+        .maybeSingle();
+
+      if (profile && profile.role !== role) {
+        issues.push({
+          sheet_row_number: sheetRowNumber,
+          issue_type: "role_conflict",
+          message: `"${normalizedEmail}" already has role "${profile.role}" — the sheet's ${roleLabel} list wants "${role}". Not changed automatically; update manually if intentional.`,
+        });
+        return;
+      }
+      if (!profile) {
+        // Auth user exists (e.g. created some other way) but has no profile row yet.
+        const { error } = await admin
+          .from("user_profiles")
+          .insert({ id: existingUser.id, role, display_name: displayName, must_change_password: true });
+        if (!error) await logCreated();
+      }
+      return; // already exists with the correct role — no-op
+    }
+
+    const { data: created, error: createError } = await admin.auth.admin.createUser({
+      email: normalizedEmail,
+      email_confirm: true,
+    });
+    if (createError || !created.user) {
+      issues.push({
+        sheet_row_number: sheetRowNumber,
+        issue_type: "account_create_failed",
+        message: `Could not create ${roleLabel} account for "${normalizedEmail}": ${createError?.message}`,
+      });
+      return;
+    }
+
+    const { error: profileError } = await admin
+      .from("user_profiles")
+      .insert({ id: created.user.id, role, display_name: displayName, must_change_password: true });
+    if (profileError) {
+      await admin.auth.admin.deleteUser(created.user.id);
+      issues.push({
+        sheet_row_number: sheetRowNumber,
+        issue_type: "account_create_failed",
+        message: `Could not create ${roleLabel} profile for "${normalizedEmail}": ${profileError.message}`,
+      });
+      return;
+    }
+
+    await logCreated();
   }
 
   async function finish(status: SyncResult["status"], errorSummary?: string): Promise<SyncResult> {
@@ -350,7 +489,7 @@ export async function runSync(
     byNormalizedName.set(normalized, { id: investor.id, investor_code: code, full_name: name });
     rowsUpserted++;
 
-    await authorizeEmailColumn(investor.id, name, row[mainCol("Email") ?? -1], "Primary holder", sheetRowNumber);
+    await authorizeEmailColumn(investor.id, name, row[mainCol("Primary Email") ?? -1], "Primary holder", sheetRowNumber);
     await authorizeEmailColumn(investor.id, name, row[mainCol("Secondary Email") ?? -1], "Joint holder", sheetRowNumber);
 
     let vehicleId = vehicleIds.get(vehicleName);
@@ -370,6 +509,14 @@ export async function runSync(
     }
 
     positionsByInvestorId.set(investor.id, { code, vehicleId, invested: investedAmount, current: currentValue, sheetRowNumber });
+  }
+
+  // ---------- Admin / Founder reference lists (same tab, below the investor rows) ----------
+  for (const entry of findLabeledBlock(mainRows, "Admin Names", "Admin Email")) {
+    await authorizePrivilegedAccount(entry.email, entry.displayName, "admin", entry.sheetRowNumber);
+  }
+  for (const entry of findLabeledBlock(mainRows, "Founder View", "Founder Email")) {
+    await authorizePrivilegedAccount(entry.email, entry.displayName, "founder", entry.sheetRowNumber);
   }
 
   // ---------- Accounts tab: per-investor NAV ledger blocks ----------
@@ -515,7 +662,12 @@ export async function runSync(
     }
   }
 
-  const INFO_ISSUES = new Set(["new_investor_created", "ledger_block_unmatched", "login_created"]);
+  const INFO_ISSUES = new Set([
+    "new_investor_created",
+    "ledger_block_unmatched",
+    "login_created",
+    "account_created",
+  ]);
   const hasBlockingIssues = issues.some((i) => !INFO_ISSUES.has(i.issue_type));
   return finish(hasBlockingIssues ? "partial_failure" : "success");
 }

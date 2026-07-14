@@ -123,8 +123,8 @@ export default async function ManageInvestorAccessPage({
       <section className="mt-8">
         <h3 className="text-base font-semibold text-zinc-900">Portal logins</h3>
         <p className="mt-1 text-sm text-zinc-500">
-          Logins are authorized automatically from the sheet&apos;s Email / Secondary Email
-          columns on sync, or added manually below — for joint accounts, add one login per
+          Logins are authorized automatically from the sheet&apos;s Primary Email / Secondary
+          Email columns on sync, or added manually below — for joint accounts, add one login per
           holder.
         </p>
 
