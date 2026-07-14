@@ -1,6 +1,8 @@
 import "server-only";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { readSheetTab, sheetsConfigured } from "./client";
+import { authorizeLogin } from "@/lib/auth/authorize-login";
+import { recordAudit } from "@/lib/admin/audit";
 
 // ============================================================
 // Expected Google Sheet layout (two tabs). Column order doesn't matter —
@@ -9,10 +11,16 @@ import { readSheetTab, sheetsConfigured } from "./client";
 // to be row 1, since the real sheet has title rows above it.
 //
 // Tab "AIGF vs Al Maha" (the investor list):
-//   S. No. | Name | Fund | Referral | Invested Amount | Current Value
+//   S. No. | Name | Fund | Referral | Invested Amount | Current Value | Email | Secondary Email
 //   "Fund" is "AIGF" or "Al Maha" (mapped to the full vehicle name below,
 //   not stored verbatim). Rows stop at the first blank Name — everything
 //   below that on the tab is on-sheet summary formulas, not data.
+//   "Email" / "Secondary Email" are optional — when present, a portal login
+//   is authorized for each (Email -> "Primary holder", Secondary Email ->
+//   "Joint holder"), reusing the same authorizeLogin() the admin "Add
+//   login" action uses. This only ever ADDS logins: removing or changing an
+//   email in the sheet never disables or deletes the login that was created
+//   from it — that's a manual admin action (Investors -> Manage access).
 //
 // Tab "Accounts" (per-investor NAV ledger — stacked blocks, not one flat
 // table): a row with just the investor's name in column A, immediately
@@ -35,10 +43,6 @@ import { readSheetTab, sheetsConfigured } from "./client";
 // sheet has no stable per-row ID column. An unmatched name gets a freshly
 // minted "DCP-####" code (logged as an info issue so admins notice and can
 // sanity-check it wasn't just a name edit, not a genuinely new investor).
-//
-// There are no email columns on this sheet. Portal logins are never
-// touched by this sync — they're provisioned manually via the admin
-// "Add login" action (src/app/admin/investors/actions.ts).
 // ============================================================
 
 type Issue = { sheet_row_number: number | null; issue_type: string; message: string; raw_row_data?: unknown };
@@ -81,6 +85,8 @@ function normalizeName(name: string) {
     .replace(/\s*&\s*/g, " & ")
     .replace(/\s+/g, " ");
 }
+
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 function parseNumber(raw: string | undefined): number | null | "invalid" {
   if (raw === undefined || raw.trim() === "") return null;
@@ -159,6 +165,52 @@ export async function runSync(
   let rowsRead = 0;
   let rowsUpserted = 0;
   let rowsSkipped = 0;
+
+  // Authorize a login from a sheet email cell, if present — reuses the same
+  // create-or-link semantics as the admin "Add login" action. Never removes
+  // or disables anything; a blank/removed cell is simply a no-op.
+  async function authorizeEmailColumn(
+    investorId: string,
+    fullName: string,
+    rawEmail: string | undefined,
+    label: string,
+    sheetRowNumber: number,
+  ) {
+    const raw = (rawEmail ?? "").trim();
+    if (!raw) return;
+    const email = raw.toLowerCase();
+    if (!EMAIL_RE.test(email)) {
+      issues.push({
+        sheet_row_number: sheetRowNumber,
+        issue_type: "bad_email",
+        message: `Investor "${fullName}": "${raw}" doesn't look like a valid email — login not created`,
+      });
+      return;
+    }
+
+    const result = await authorizeLogin(admin, investorId, email, fullName, label);
+    if (result === "created") {
+      issues.push({
+        sheet_row_number: sheetRowNumber,
+        issue_type: "login_created",
+        message: `Login created for "${fullName}" <${email}> (${label})`,
+      });
+      await recordAudit({
+        actorUserId: triggeredByUser ?? null,
+        actorEmail: triggeredBy === "manual" ? undefined : "sheet sync (scheduled)",
+        action: "login_added",
+        targetType: "investor_login",
+        targetEmail: email,
+        details: { investorId, label, source: "sheet_sync" },
+      });
+    } else if (result === "conflict") {
+      issues.push({
+        sheet_row_number: sheetRowNumber,
+        issue_type: "login_conflict",
+        message: `"${email}" for "${fullName}" is already used by a different account — resolve manually in Investors -> Manage access`,
+      });
+    }
+  }
 
   async function finish(status: SyncResult["status"], errorSummary?: string): Promise<SyncResult> {
     if (issues.length) {
@@ -297,6 +349,9 @@ export async function runSync(
     }
     byNormalizedName.set(normalized, { id: investor.id, investor_code: code, full_name: name });
     rowsUpserted++;
+
+    await authorizeEmailColumn(investor.id, name, row[mainCol("Email") ?? -1], "Primary holder", sheetRowNumber);
+    await authorizeEmailColumn(investor.id, name, row[mainCol("Secondary Email") ?? -1], "Joint holder", sheetRowNumber);
 
     let vehicleId = vehicleIds.get(vehicleName);
     if (!vehicleId) {
@@ -460,7 +515,7 @@ export async function runSync(
     }
   }
 
-  const INFO_ISSUES = new Set(["new_investor_created", "ledger_block_unmatched"]);
+  const INFO_ISSUES = new Set(["new_investor_created", "ledger_block_unmatched", "login_created"]);
   const hasBlockingIssues = issues.some((i) => !INFO_ISSUES.has(i.issue_type));
   return finish(hasBlockingIssues ? "partial_failure" : "success");
 }

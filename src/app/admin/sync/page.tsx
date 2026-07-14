@@ -42,8 +42,9 @@ export default async function AdminSyncPage() {
           <h2 className="text-lg font-semibold text-zinc-900">Monthly data sync</h2>
           <p className="mt-1 text-sm text-zinc-500">
             Pulls the master Google Sheet (tabs &quot;AIGF vs Al Maha&quot; and
-            &quot;Accounts&quot;) and updates the portal. Runs automatically on the 1st of each
-            month; use the button for an immediate refresh.
+            &quot;Accounts&quot;) and updates the portal, authorizing any new logins found in the
+            Email / Secondary Email columns. Runs automatically on the 1st of each month; use the
+            button for an immediate refresh.
           </p>
         </div>
         {!readOnly && (

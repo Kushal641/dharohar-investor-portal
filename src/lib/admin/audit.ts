@@ -4,7 +4,8 @@ import { createAdminClient } from "@/lib/supabase/admin";
 // Fire-and-forget audit write (SOP §12.2). Failures are logged but never
 // block the underlying admin action.
 export async function recordAudit(entry: {
-  actorUserId: string;
+  // Nullable for scheduled sheet syncs, which have no human actor.
+  actorUserId: string | null;
   actorEmail?: string | null;
   action: string;
   targetType: "investor_login" | "internal_user";
