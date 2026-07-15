@@ -29,6 +29,7 @@ export default async function AdminOverviewPage() {
 
   const links = [
     { href: "/admin/investors", title: "Investor management", desc: "Add, edit, and disable investors; create logins and reset passwords." },
+    { href: "/admin/team", title: "Team accounts", desc: "Admin and Founder accounts — reset a password back to the default." },
     { href: "/admin/sync", title: "Data sync", desc: "Run the monthly Google Sheet sync and review its history." },
     { href: "/internal/investors", title: "Reports & charts", desc: "The full internal dashboard — summaries, charts, and investor drill-down." },
   ];
