@@ -2,7 +2,7 @@ import { createClient } from "@/lib/supabase/server";
 import { sheetsConfigured } from "@/lib/sheets/client";
 import { isReadOnlyViewer } from "@/lib/admin/guard";
 import { syncNow } from "./actions";
-import { BUTTON_CLASS } from "@/components/form-controls";
+import { SyncButton, SyncRunningBanner } from "@/components/sync-progress";
 
 const STATUS_STYLES: Record<string, string> = {
   success: "bg-green-50 text-green-700",
@@ -49,9 +49,7 @@ export default async function AdminSyncPage() {
         </div>
         {!readOnly && (
           <form action={syncNow}>
-            <button type="submit" className={BUTTON_CLASS} disabled={!configured}>
-              Sync now
-            </button>
+            <SyncButton disabled={!configured} />
           </form>
         )}
       </div>
@@ -64,7 +62,9 @@ export default async function AdminSyncPage() {
         </p>
       )}
 
-      {latest && latest.status !== "success" && (
+      {latest?.status === "running" && <SyncRunningBanner startedAt={latest.started_at} />}
+
+      {latest && latest.status !== "success" && latest.status !== "running" && (
         <p className={`mt-4 rounded-md px-3 py-2 text-sm ${STATUS_STYLES[latest.status]}`}>
           Latest sync ({formatTimestamp(latest.started_at)}):{" "}
           {latest.status === "failed"

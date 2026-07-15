@@ -29,3 +29,53 @@ export async function resetTeamPassword(formData: FormData) {
   revalidatePath("/admin/team");
   redirect("/admin/team?reset_done=1");
 }
+
+// The sheet's Admin Email / Founder Email lists only ever ADD accounts
+// (src/lib/sheets/sync.ts) — removing a row from the sheet never disables
+// or deletes anything, so this is how you actually revoke someone's access
+// once they're gone from the sheet.
+export async function setTeamAccountDisabled(formData: FormData) {
+  const actor = await requireAdmin();
+  const admin = createAdminClient();
+
+  const authUserId = String(formData.get("authUserId"));
+  const disable = formData.get("disable") === "1";
+
+  if (authUserId === actor.id) redirect("/admin/team?error=self");
+
+  await admin.from("user_profiles").update({ is_disabled: disable }).eq("id", authUserId);
+
+  await recordAudit({
+    actorUserId: actor.id,
+    actorEmail: actor.email,
+    action: disable ? "login_disabled" : "login_enabled",
+    targetType: "internal_user",
+    targetEmail: await emailForAuthUser(authUserId),
+  });
+
+  revalidatePath("/admin/team");
+  redirect("/admin/team");
+}
+
+export async function deleteTeamAccount(formData: FormData) {
+  const actor = await requireAdmin();
+  const admin = createAdminClient();
+
+  const authUserId = String(formData.get("authUserId"));
+
+  if (authUserId === actor.id) redirect("/admin/team?error=self");
+
+  const targetEmail = await emailForAuthUser(authUserId);
+  await admin.auth.admin.deleteUser(authUserId); // cascades to the profile row
+
+  await recordAudit({
+    actorUserId: actor.id,
+    actorEmail: actor.email,
+    action: "login_deleted",
+    targetType: "internal_user",
+    targetEmail,
+  });
+
+  revalidatePath("/admin/team");
+  redirect("/admin/team?deleted=1");
+}
