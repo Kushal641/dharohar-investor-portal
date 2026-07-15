@@ -3,7 +3,6 @@ import { createClient } from "@/lib/supabase/server";
 
 const ROLE_HOME: Record<string, string> = {
   investor: "/dashboard",
-  internal: "/internal/investors",
   admin: "/admin/dashboard",
   founder: "/admin/dashboard",
 };

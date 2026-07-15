@@ -7,7 +7,6 @@
 // Test accounts created (all passwords: Test-Pass-123):
 //   admin@dharohar-test.com      admin
 //   founder@dharohar-test.com    founder (same view as admin, read-only)
-//   internal@dharohar-test.com   internal (read-only)
 //   investor.a@dharohar-test.com investor — Ramesh Test (DCP-TEST-001)
 //   investor.a2@dharohar-test.com joint holder — same investor record as investor.a
 //   investor.b@dharohar-test.com investor — Suresh Test (DCP-TEST-002)
@@ -78,7 +77,6 @@ async function main() {
   // --- users ---
   await ensureUser("admin@dharohar-test.com", "admin", "Test Admin");
   await ensureUser("founder@dharohar-test.com", "founder", "Test Founder");
-  await ensureUser("internal@dharohar-test.com", "internal", "Test Internal");
   const invA = await ensureUser("investor.a@dharohar-test.com", "investor", "Ramesh Test");
   const invA2 = await ensureUser("investor.a2@dharohar-test.com", "investor", "Ramesh Test (Joint)", true);
   const invB = await ensureUser("investor.b@dharohar-test.com", "investor", "Suresh Test");
@@ -165,26 +163,26 @@ async function main() {
     process.exit(1);
   }
 
-  // Internal user: sees all, cannot write
-  const asInternal = createClient(url, anonKey, { auth: { persistSession: false } });
-  await asInternal.auth.signInWithPassword({ email: "internal@dharohar-test.com", password: PASSWORD });
-  const { data: internalSees } = await asInternal.from("investors").select("investor_code");
-  if ((internalSees ?? []).length >= 2) {
-    console.log(`PASS: internal user sees all ${internalSees.length} investors`);
+  // Founder: sees all, cannot write
+  const asFounder = createClient(url, anonKey, { auth: { persistSession: false } });
+  await asFounder.auth.signInWithPassword({ email: "founder@dharohar-test.com", password: PASSWORD });
+  const { data: founderSees } = await asFounder.from("investors").select("investor_code");
+  if ((founderSees ?? []).length >= 2) {
+    console.log(`PASS: founder sees all ${founderSees.length} investors`);
   } else {
-    console.error(`FAIL: internal user sees: ${JSON.stringify(internalSees)}`);
+    console.error(`FAIL: founder sees: ${JSON.stringify(founderSees)}`);
     process.exit(1);
   }
-  await asInternal.from("investors").update({ full_name: "Hacked" }).eq("investor_code", "DCP-TEST-002");
-  const { data: bAfter } = await asInternal
+  await asFounder.from("investors").update({ full_name: "Hacked" }).eq("investor_code", "DCP-TEST-002");
+  const { data: bAfter } = await asFounder
     .from("investors")
     .select("full_name")
     .eq("investor_code", "DCP-TEST-002")
     .single();
   if (bAfter.full_name === "Suresh Test") {
-    console.log("PASS: internal user is read-only");
+    console.log("PASS: founder is read-only");
   } else {
-    console.error("FAIL: internal user modified data");
+    console.error("FAIL: founder modified data");
     process.exit(1);
   }
 

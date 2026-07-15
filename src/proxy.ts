@@ -11,7 +11,6 @@ const PUBLIC_PATHS = [
 
 const ROLE_HOME: Record<string, string> = {
   investor: "/dashboard",
-  internal: "/internal/investors",
   admin: "/admin/dashboard",
   founder: "/admin/dashboard",
 };
@@ -112,9 +111,6 @@ export default async function proxy(request: NextRequest) {
       return NextResponse.redirect(new URL(home, request.url));
     }
     if (role === "investor" && (path.startsWith("/internal") || path.startsWith("/admin"))) {
-      return NextResponse.redirect(new URL(home, request.url));
-    }
-    if (role === "internal" && path.startsWith("/admin")) {
       return NextResponse.redirect(new URL(home, request.url));
     }
   }
