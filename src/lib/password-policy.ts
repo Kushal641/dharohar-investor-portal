@@ -1,15 +1,14 @@
-// SOP v1.1 §15 password policy. Applies to investor and internal accounts;
-// the Administrator follows the stricter §12.3 rule (minimum 14 characters).
-// Returns null if valid, otherwise a message naming the failed condition
-// (§15.2 requires telling the user WHICH condition failed).
+// SOP v1.1 §15 password policy — same rule for every role (investor,
+// internal, admin, founder). Returns null if valid, otherwise a message
+// naming the failed condition (§15.2 requires telling the user WHICH
+// condition failed).
 
-export function validatePassword(password: string, opts?: { isAdmin?: boolean }): string | null {
-  const isAdmin = opts?.isAdmin ?? false;
-  const min = isAdmin ? 14 : 8;
-  const max = isAdmin ? 64 : 14;
+const MIN_LENGTH = 8;
+const MAX_LENGTH = 14;
 
-  if (password.length < min) return `Password must be at least ${min} characters.`;
-  if (password.length > max) return `Password must be at most ${max} characters.`;
+export function validatePassword(password: string): string | null {
+  if (password.length < MIN_LENGTH) return `Password must be at least ${MIN_LENGTH} characters.`;
+  if (password.length > MAX_LENGTH) return `Password must be at most ${MAX_LENGTH} characters.`;
   if (!/[A-Z]/.test(password)) return "Password must include at least one uppercase letter.";
   if (!/[a-z]/.test(password)) return "Password must include at least one lowercase letter.";
   if (!/[0-9]/.test(password)) return "Password must include at least one number.";
@@ -20,7 +19,6 @@ export function validatePassword(password: string, opts?: { isAdmin?: boolean })
 }
 
 export const PASSWORD_HINT = "8–14 characters with an uppercase letter, a lowercase letter, a number, and a special character.";
-export const ADMIN_PASSWORD_HINT = "At least 14 characters with an uppercase letter, a lowercase letter, a number, and a special character.";
 
 // Every new account (investor, admin, founder) starts with this password —
 // set directly via the Supabase admin API, so it never has to satisfy

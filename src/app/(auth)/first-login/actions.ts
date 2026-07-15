@@ -18,15 +18,7 @@ export async function completeFirstLogin(formData: FormData) {
     redirect("/login");
   }
 
-  const { data: profile } = await supabase
-    .from("user_profiles")
-    .select("role")
-    .eq("id", user.id)
-    .single();
-
-  const policyError = validatePassword(password, {
-    isAdmin: profile?.role === "admin" || profile?.role === "founder",
-  });
+  const policyError = validatePassword(password);
   if (policyError) {
     redirect(`/first-login?error=policy&detail=${encodeURIComponent(policyError)}`);
   }
