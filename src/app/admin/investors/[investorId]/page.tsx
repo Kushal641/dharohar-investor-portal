@@ -3,6 +3,7 @@ import { notFound } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { isReadOnlyViewer } from "@/lib/admin/guard";
+import { DEFAULT_STARTING_PASSWORD } from "@/lib/password-policy";
 import { setLoginDisabled, resetAccess, deleteLogin, addLogin } from "../actions";
 
 export default async function ManageInvestorAccessPage({
@@ -92,15 +93,15 @@ export default async function ManageInvestorAccessPage({
 
       {reset_done && (
         <p className="mt-4 rounded-md bg-green-50 px-3 py-2 text-sm text-green-800">
-          Access reset. Ask the investor to use &quot;Activate your account&quot; on the login
-          page — they&apos;ll receive a one-time code and set a new password.
+          Password reset to the default starting password ({DEFAULT_STARTING_PASSWORD}). Tell the
+          investor to log in with it — they&apos;ll be prompted to set their own password.
         </p>
       )}
 
       {add_login === "created" && (
         <p className="mt-4 rounded-md bg-green-50 px-3 py-2 text-sm text-green-800">
-          Login added. The investor can now use &quot;Activate your account&quot; on the login
-          page to receive a one-time code and set a password.
+          Login added with the default starting password ({DEFAULT_STARTING_PASSWORD}). Give the
+          investor that password to log in with — they&apos;ll be prompted to set their own.
         </p>
       )}
       {add_login === "existing" && (
@@ -125,7 +126,8 @@ export default async function ManageInvestorAccessPage({
         <p className="mt-1 text-sm text-zinc-500">
           Logins are authorized automatically from the sheet&apos;s Primary Email / Secondary
           Email columns on sync, or added manually below — for joint accounts, add one login per
-          holder.
+          holder. Every new login starts with the default password ({DEFAULT_STARTING_PASSWORD})
+          and must be changed on first use.
         </p>
 
         <div className="mt-4 space-y-3">
@@ -142,7 +144,7 @@ export default async function ManageInvestorAccessPage({
                     )}
                     {!login.isDisabled && login.pendingActivation && (
                       <span className="ml-2 rounded-full bg-amber-50 px-2 py-0.5 text-xs text-amber-700">
-                        Awaiting activation
+                        Default password not changed yet
                       </span>
                     )}
                   </p>

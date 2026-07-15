@@ -3,6 +3,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { readSheetTab, sheetsConfigured } from "./client";
 import { authorizeLogin } from "@/lib/auth/authorize-login";
 import { recordAudit } from "@/lib/admin/audit";
+import { DEFAULT_STARTING_PASSWORD } from "@/lib/password-policy";
 
 // ============================================================
 // Expected Google Sheet layout (two tabs). Column order doesn't matter —
@@ -282,7 +283,7 @@ export async function runSync(
       issues.push({
         sheet_row_number: sheetRowNumber,
         issue_type: "account_created",
-        message: `${roleLabel} account created for "${displayName}" <${normalizedEmail}> — they can activate via "Activate your account" on the login page`,
+        message: `${roleLabel} account created for "${displayName}" <${normalizedEmail}> — starts with the default password, must change it on first login`,
       });
       await recordAudit({
         actorUserId: triggeredByUser ?? null,
@@ -324,6 +325,7 @@ export async function runSync(
 
     const { data: created, error: createError } = await admin.auth.admin.createUser({
       email: normalizedEmail,
+      password: DEFAULT_STARTING_PASSWORD,
       email_confirm: true,
     });
     if (createError || !created.user) {

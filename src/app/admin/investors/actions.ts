@@ -10,6 +10,7 @@ import { requireAdmin } from "@/lib/admin/guard";
 import { recordAudit, emailForAuthUser } from "@/lib/admin/audit";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { authorizeLogin } from "@/lib/auth/authorize-login";
+import { DEFAULT_STARTING_PASSWORD } from "@/lib/password-policy";
 
 // Authorize a new portal login for an investor directly from the admin
 // panel — used for joint accounts (add a second holder) and for any
@@ -78,10 +79,9 @@ export async function setLoginDisabled(formData: FormData) {
   redirect(back);
 }
 
-// "Reset access": invalidates the current password by forcing the investor
-// through activation again — they request a fresh OTP at /activate and are
-// required to set a new password. Complements the self-service
-// forgot-password email flow.
+// "Reset access": for investors who've forgotten their password (there's no
+// self-service reset — they email an admin). Sets the account back to the
+// shared default password and forces a change on next login.
 export async function resetAccess(formData: FormData) {
   const actor = await requireAdmin();
   const admin = createAdminClient();
@@ -90,6 +90,7 @@ export async function resetAccess(formData: FormData) {
   const back = String(formData.get("back") ?? "/admin/investors");
   const reason = String(formData.get("reason") ?? "");
 
+  await admin.auth.admin.updateUserById(authUserId, { password: DEFAULT_STARTING_PASSWORD });
   await admin.from("user_profiles").update({ must_change_password: true }).eq("id", authUserId);
 
   await recordAudit({

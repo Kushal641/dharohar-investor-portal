@@ -1,5 +1,6 @@
 import "server-only";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { DEFAULT_STARTING_PASSWORD } from "@/lib/password-policy";
 
 // Idempotently ensure `email` is an authorized investor login linked to
 // `investorId`. Returns "created" | "existing" | "conflict". Shared by the
@@ -47,9 +48,11 @@ export async function authorizeLogin(
     return error ? "conflict" : "created";
   }
 
-  // Brand-new: passwordless account, activated by the investor via OTP.
+  // Brand-new: starts with the shared default password, must change it on
+  // first login (must_change_password below).
   const { data: created, error: createError } = await admin.auth.admin.createUser({
     email,
+    password: DEFAULT_STARTING_PASSWORD,
     email_confirm: true,
   });
   if (createError || !created.user) return "conflict";
@@ -58,7 +61,7 @@ export async function authorizeLogin(
     id: created.user.id,
     role: "investor",
     display_name: displayName,
-    must_change_password: true, // forces password setup right after OTP entry
+    must_change_password: true,
   });
   if (profileError) {
     await admin.auth.admin.deleteUser(created.user.id);
