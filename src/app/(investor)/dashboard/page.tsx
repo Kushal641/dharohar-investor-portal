@@ -19,7 +19,7 @@ export default async function InvestorDashboardPage() {
   if (!investor) {
     return (
       <p className="text-sm text-zinc-600">
-        Your investor record hasn't been linked yet — contact the administrator.
+        Your investor record hasn&apos;t been linked yet — contact the administrator.
       </p>
     );
   }

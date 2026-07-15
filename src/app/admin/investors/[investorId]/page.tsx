@@ -11,10 +11,10 @@ export default async function ManageInvestorAccessPage({
   searchParams,
 }: {
   params: Promise<{ investorId: string }>;
-  searchParams: Promise<{ reset_done?: string; add_login?: string }>;
+  searchParams: Promise<{ reset_done?: string; add_login?: string; error?: string }>;
 }) {
   const { investorId } = await params;
-  const { reset_done, add_login } = await searchParams;
+  const { reset_done, add_login, error } = await searchParams;
   const supabase = await createClient();
   const readOnly = await isReadOnlyViewer();
 
@@ -118,6 +118,18 @@ export default async function ManageInvestorAccessPage({
       {add_login === "bad_email" && (
         <p className="mt-4 rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">
           That doesn&apos;t look like a valid email address.
+        </p>
+      )}
+      {error === "reset_failed" && (
+        <p className="mt-4 rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">
+          Couldn&apos;t reset that password. Try again, or check Supabase directly if it keeps
+          failing.
+        </p>
+      )}
+      {error === "delete_failed" && (
+        <p className="mt-4 rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">
+          Couldn&apos;t delete that login. Try Disable instead, or check Supabase directly if it
+          keeps failing.
         </p>
       )}
 

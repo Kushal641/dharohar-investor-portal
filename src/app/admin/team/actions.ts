@@ -15,7 +15,10 @@ export async function resetTeamPassword(formData: FormData) {
 
   const authUserId = String(formData.get("authUserId"));
 
-  await admin.auth.admin.updateUserById(authUserId, { password: DEFAULT_STARTING_PASSWORD });
+  const { error } = await admin.auth.admin.updateUserById(authUserId, {
+    password: DEFAULT_STARTING_PASSWORD,
+  });
+  if (error) redirect(`/admin/team?error=reset_failed&detail=${encodeURIComponent(error.message)}`);
   await admin.from("user_profiles").update({ must_change_password: true }).eq("id", authUserId);
 
   await recordAudit({
@@ -66,7 +69,8 @@ export async function deleteTeamAccount(formData: FormData) {
   if (authUserId === actor.id) redirect("/admin/team?error=self");
 
   const targetEmail = await emailForAuthUser(authUserId);
-  await admin.auth.admin.deleteUser(authUserId); // cascades to the profile row
+  const { error } = await admin.auth.admin.deleteUser(authUserId); // cascades to the profile row
+  if (error) redirect(`/admin/team?error=delete_failed&detail=${encodeURIComponent(error.message)}`);
 
   await recordAudit({
     actorUserId: actor.id,

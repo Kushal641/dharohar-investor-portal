@@ -7,9 +7,9 @@ import { resetTeamPassword, setTeamAccountDisabled, deleteTeamAccount } from "./
 export default async function AdminTeamPage({
   searchParams,
 }: {
-  searchParams: Promise<{ reset_done?: string; deleted?: string; error?: string }>;
+  searchParams: Promise<{ reset_done?: string; deleted?: string; error?: string; detail?: string }>;
 }) {
-  const { reset_done, deleted, error } = await searchParams;
+  const { reset_done, deleted, error, detail } = await searchParams;
   const readOnly = await isReadOnlyViewer();
 
   const supabase = await createClient();
@@ -57,6 +57,18 @@ export default async function AdminTeamPage({
       {error === "self" && (
         <p className="mt-4 rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">
           You can&apos;t disable or delete your own account. Ask another admin to do it.
+        </p>
+      )}
+      {error === "reset_failed" && (
+        <p className="mt-4 rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">
+          Couldn&apos;t reset that password{detail ? `: ${detail}` : ""}. Try again, or check
+          Supabase directly if it keeps failing.
+        </p>
+      )}
+      {error === "delete_failed" && (
+        <p className="mt-4 rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">
+          Couldn&apos;t delete that account{detail ? `: ${detail}` : ""}. Try Disable instead, or
+          check Supabase directly if it keeps failing.
         </p>
       )}
 

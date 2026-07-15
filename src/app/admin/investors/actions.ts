@@ -90,7 +90,10 @@ export async function resetAccess(formData: FormData) {
   const back = String(formData.get("back") ?? "/admin/investors");
   const reason = String(formData.get("reason") ?? "");
 
-  await admin.auth.admin.updateUserById(authUserId, { password: DEFAULT_STARTING_PASSWORD });
+  const { error: updateError } = await admin.auth.admin.updateUserById(authUserId, {
+    password: DEFAULT_STARTING_PASSWORD,
+  });
+  if (updateError) redirect(`${back}?error=reset_failed`);
   await admin.from("user_profiles").update({ must_change_password: true }).eq("id", authUserId);
 
   await recordAudit({
@@ -125,7 +128,8 @@ export async function deleteLogin(formData: FormData) {
   if (profile?.role !== "investor") redirect(back);
 
   const targetEmail = await emailForAuthUser(authUserId);
-  await admin.auth.admin.deleteUser(authUserId); // cascades to profile + link
+  const { error: deleteError } = await admin.auth.admin.deleteUser(authUserId); // cascades to profile + link
+  if (deleteError) redirect(`${back}?error=delete_failed`);
 
   await recordAudit({
     actorUserId: actor.id,
