@@ -13,13 +13,16 @@ const STATUS_STYLES: Record<string, string> = {
 
 function formatTimestamp(iso: string | null) {
   if (!iso) return "—";
-  return new Date(iso).toLocaleString("en-US", {
-    month: "short",
-    day: "2-digit",
-    year: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-  });
+  return (
+    new Date(iso).toLocaleString("en-US", {
+      timeZone: "Asia/Dubai",
+      month: "short",
+      day: "2-digit",
+      year: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+    }) + " GST"
+  );
 }
 
 export default async function AdminSyncPage() {

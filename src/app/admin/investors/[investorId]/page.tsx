@@ -163,7 +163,7 @@ export default async function ManageInvestorAccessPage({
                   <p className="text-xs text-zinc-500">
                     {login.email} — {login.label ?? "Holder"}
                     {login.lastSignIn &&
-                      ` · last sign-in ${new Date(login.lastSignIn).toLocaleDateString("en-US", { month: "short", day: "2-digit", year: "numeric" })}`}
+                      ` · last sign-in ${new Date(login.lastSignIn).toLocaleDateString("en-US", { timeZone: "Asia/Dubai", month: "short", day: "2-digit", year: "numeric" })}`}
                   </p>
                 </div>
                 {!readOnly && (

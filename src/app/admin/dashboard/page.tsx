@@ -55,13 +55,14 @@ export default async function AdminOverviewPage() {
         <p className="mt-4 text-xs text-zinc-500">
           Last sync:{" "}
           {new Date(latestRun.started_at).toLocaleString("en-US", {
+            timeZone: "Asia/Dubai",
             month: "short",
             day: "2-digit",
             year: "numeric",
             hour: "2-digit",
             minute: "2-digit",
           })}{" "}
-          — {latestRun.status.replace("_", " ")}
+          GST — {latestRun.status.replace("_", " ")}
         </p>
       )}
 
